@@ -1,0 +1,422 @@
+%PDF-1.3
+%ºß¬à
+3 0 obj
+<</Type /Page
+/Parent 1 0 R
+/Resources 2 0 R
+/MediaBox [0 0 595.2799999999999727 841.8899999999999864]
+/Contents 4 0 R
+>>
+endobj
+4 0 obj
+<<
+/Length 5753
+>>
+stream
+0.5670000000000001 w
+0 G
+0.11 0.15 0.23 rg
+0. 841.8899999999999864 595.2799999999999727 -90.708661417322844 re
+f
+BT
+/F2 18 Tf
+20.6999999999999993 TL
+1. g
+51.0236220472441033 796.5356692913385359 Td
+(Cardoso App) Tj
+ET
+BT
+/F1 11 Tf
+12.6499999999999986 TL
+0.804 0.831 0.871 rg
+51.0236220472441033 773.8585039370078675 Td
+(Product Update) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0.804 0.831 0.871 rg
+484.156377952755804 773.8585039370078675 Td
+(17 June 2026) Tj
+ET
+BT
+/F1 10.5 Tf
+12.0749999999999993 TL
+0.353 0.392 0.451 rg
+51.0236220472441033 717.1655905511811397 Td
+(This update \(v2026.5.9.8\) adds a new Sales by Vendor report and a breakdown of BAT exceptions by) Tj
+T* (reason. Report printing has also been tightened: the page footer no longer bleeds into table content, and) Tj
+T* (week blocks in the BAT Exceptions report stay together across page breaks.) Tj
+ET
+BT
+/F2 13 Tf
+14.9499999999999993 TL
+0.129 0.145 0.161 rg
+51.0236220472441033 655.9372440944881646 Td
+(New Features) Tj
+ET
+0.09 0.48 0.31 rg
+513.2500787401573916 668.4096850393700606 m
+540.8548031496062549 668.4096850393700606 l
+542.7334410387944672 668.4096850393700606 544.2563779527558836 666.8867481254086442 544.2563779527558836 665.0081102362204319 c
+544.2563779527558836 654.8033858267716596 l
+544.2563779527558836 652.9247479375834473 542.3777400635676713 651.4018110236220309 540.8548031496062549 651.4018110236220309 c
+513.2500787401573916 651.4018110236220309 l
+511.3714408509691793 651.4018110236220309 509.8485039370078198 653.2804489128101295 509.8485039370078198 654.8033858267716596 c
+509.8485039370078198 665.0081102362204319 l
+509.8485039370078198 666.8867481254086442 511.7271418261960321 668.4096850393700606 513.2500787401573916 668.4096850393700606 c
+h
+f
+BT
+/F2 7.5 Tf
+8.625 TL
+1. g
+518.3524409448818915 655.9372440944881646 Td
+(NEW) Tj
+ET
+0.87 0.89 0.91 RG
+0.8503937007874016 w
+51.0236220472441033 647.4333070866141497 m
+544.2563779527558836 647.4333070866141497 l
+S
+0.09 0.48 0.31 rg
+51.0236220472441033 638.9293700787401349 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 630.42543307086612 Td
+(Sales by Vendor report) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 616.2522047244094665 Td
+(A new report shows all item sales per vendor for any date range you choose. Filter by vendor,) Tj
+T* (toggle a year-over-year comparison to see how each vendor's sales track against the same) Tj
+T* (period last year, and switch to a month-by-month matrix for a detailed breakdown. Vendor) Tj
+T* (names are sourced directly from the Sage vendor master so they are always accurate.) Tj
+ET
+0.09 0.48 0.31 rg
+51.0236220472441033 557.5750393700786844 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 549.0711023622046696 Td
+(BAT Exceptions by Week — totals by exception reason) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 534.8978740157480161 Td
+(The BAT Exceptions by Week report now shows the total value of exceptions broken down by) Tj
+T* (reason, so you can see at a glance which exception types are driving the most variance each) Tj
+T* (week.) Tj
+ET
+BT
+/F2 13 Tf
+14.9499999999999993 TL
+0.129 0.145 0.161 rg
+51.0236220472441033 469.9844881889763428 Td
+(Fixes) Tj
+ET
+0.69 0.49 0.09 rg
+508.6750787401573461 482.4569291338582389 m
+540.8548031496061412 482.4569291338582389 l
+542.7334410387943535 482.4569291338582389 544.2563779527557699 480.9339922198968793 544.2563779527557699 479.0553543307086102 c
+544.2563779527557699 468.850629921259781 l
+544.2563779527557699 466.9719920320715687 542.3777400635675576 465.4490551181102092 540.8548031496061412 465.4490551181102092 c
+508.6750787401573461 465.4490551181102092 l
+506.7964408509691339 465.4490551181102092 505.2735039370077743 467.3276930072984214 505.2735039370077743 468.850629921259781 c
+505.2735039370077743 479.0553543307086102 l
+505.2735039370077743 480.9339922198968225 507.1521418261959866 482.456929133858182 508.6750787401573461 482.456929133858182 c
+h
+f
+BT
+/F2 7.5 Tf
+8.625 TL
+1. g
+513.7774409448817323 469.9844881889763428 Td
+(FIXED) Tj
+ET
+0.87 0.89 0.91 RG
+0.8503937007874016 w
+51.0236220472441033 461.480551181102328 m
+544.2563779527558836 461.480551181102328 l
+S
+0.69 0.49 0.09 rg
+51.0236220472441033 452.9766141732283131 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 444.4726771653542983 Td
+(Report footers no longer overlap table content when printing) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 430.2994488188975879 Td
+(The footer on printed reports now flows naturally at the bottom of the page and no longer bleeds) Tj
+T* (into the last rows of a table.) Tj
+ET
+0.69 0.49 0.09 rg
+51.0236220472441033 398.8348818897637784 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 390.3309448818897636 Td
+(BAT Exceptions week blocks stay together across page breaks) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 376.1577165354330532 Td
+(When printing the BAT Exceptions report, each week's block is now kept whole — entries for a) Tj
+T* (week are no longer split across two pages.) Tj
+ET
+0.87 0.89 0.91 RG
+0.8503937007874016 w
+51.0236220472441033 34.0157480314960665 m
+544.2563779527558836 34.0157480314960665 l
+S
+BT
+/F1 8 Tf
+9.1999999999999993 TL
+0.353 0.392 0.451 rg
+51.0236220472441033 19.8425196850394059 Td
+(Cardoso App · 17 June 2026) Tj
+ET
+BT
+/F1 8 Tf
+9.1999999999999993 TL
+0.353 0.392 0.451 rg
+503.6163779527558404 19.8425196850394059 Td
+(Page 1 of 1) Tj
+ET
+endstream
+endobj
+1 0 obj
+<</Type /Pages
+/Kids [3 0 R ]
+/Count 1
+>>
+endobj
+5 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+6 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica-Bold
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+7 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica-Oblique
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+8 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica-BoldOblique
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+9 0 obj
+<<
+/Type /Font
+/BaseFont /Courier
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+10 0 obj
+<<
+/Type /Font
+/BaseFont /Courier-Bold
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+11 0 obj
+<<
+/Type /Font
+/BaseFont /Courier-Oblique
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+12 0 obj
+<<
+/Type /Font
+/BaseFont /Courier-BoldOblique
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+13 0 obj
+<<
+/Type /Font
+/BaseFont /Times-Roman
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+14 0 obj
+<<
+/Type /Font
+/BaseFont /Times-Bold
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+15 0 obj
+<<
+/Type /Font
+/BaseFont /Times-Italic
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+16 0 obj
+<<
+/Type /Font
+/BaseFont /Times-BoldItalic
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+17 0 obj
+<<
+/Type /Font
+/BaseFont /ZapfDingbats
+/Subtype /Type1
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+18 0 obj
+<<
+/Type /Font
+/BaseFont /Symbol
+/Subtype /Type1
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+2 0 obj
+<<
+/ProcSet [/PDF /Text /ImageB /ImageC /ImageI]
+/Font <<
+/F1 5 0 R
+/F2 6 0 R
+/F3 7 0 R
+/F4 8 0 R
+/F5 9 0 R
+/F6 10 0 R
+/F7 11 0 R
+/F8 12 0 R
+/F9 13 0 R
+/F10 14 0 R
+/F11 15 0 R
+/F12 16 0 R
+/F13 17 0 R
+/F14 18 0 R
+>>
+/XObject <<
+>>
+>>
+endobj
+19 0 obj
+<<
+/Producer (jsPDF 4.2.1)
+/CreationDate (D:20260618060536-00'00')
+>>
+endobj
+20 0 obj
+<<
+/Type /Catalog
+/Pages 1 0 R
+/OpenAction [3 0 R /FitH null]
+/PageLayout /OneColumn
+>>
+endobj
+xref
+0 21
+0000000000 65535 f 
+0000005957 00000 n 
+0000007774 00000 n 
+0000000015 00000 n 
+0000000152 00000 n 
+0000006014 00000 n 
+0000006139 00000 n 
+0000006269 00000 n 
+0000006402 00000 n 
+0000006539 00000 n 
+0000006662 00000 n 
+0000006791 00000 n 
+0000006923 00000 n 
+0000007059 00000 n 
+0000007187 00000 n 
+0000007314 00000 n 
+0000007443 00000 n 
+0000007576 00000 n 
+0000007678 00000 n 
+0000008022 00000 n 
+0000008108 00000 n 
+trailer
+<<
+/Size 21
+/Root 20 0 R
+/Info 19 0 R
+/ID [ <4F32A0674D36F85D642FF55CADF45040> <4F32A0674D36F85D642FF55CADF45040> ]
+>>
+startxref
+8212
+%%EOF
