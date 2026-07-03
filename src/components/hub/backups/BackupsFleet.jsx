@@ -146,7 +146,7 @@ export default function BackupsFleet({
             <span className="hidden sm:block">Local</span>
             <span className="hidden sm:block">Hub copy</span>
             <span className="hidden sm:block">Off-site</span>
-            <span className="hidden sm:block">SQL</span>
+            <span className="hidden sm:block" title="SQL Server (DAT) backup on the remote site — separate from the local app backup">SQL</span>
             <span />
           </div>
 

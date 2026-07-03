@@ -52,7 +52,7 @@ function HealthPill({ tone }) {
 }
 
 // A row inside the expanded detail: one backup layer.
-function LayerDetail({ icon: Icon, iconCls, name, status, statusLabel, lastAt, size, count, extra, children }) {
+function LayerDetail({ icon: Icon, iconCls, name, status, statusLabel, lastAt, size, count, extra, sub, children }) {
   const tone = toneFor(status);
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-border/60 bg-background/60 p-3 sm:flex-row sm:items-center sm:justify-between">
@@ -65,6 +65,7 @@ function LayerDetail({ icon: Icon, iconCls, name, status, statusLabel, lastAt, s
             <span className="text-sm font-semibold text-foreground">{name}</span>
             <span className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${tone.chip}`}>{statusLabel}</span>
           </div>
+          {sub && <div className="text-[10px] text-muted-foreground/80">{sub}</div>}
           <div className="text-[11px] text-muted-foreground">
             {lastAt ? <>{fmtRelative(lastAt)} · {fmtDate(lastAt)}</> : "No backup recorded"}
             {size != null && <> · {fmtBytes(size)}</>}
@@ -165,6 +166,7 @@ export default function SiteBackupRow({
             icon={ShieldCheck} iconCls="border-border bg-muted/40 text-foreground"
             name="SQL Server (DAT)" status={m.sql.status} statusLabel={statusText(m.sql.status)}
             lastAt={m.sql.lastAt}
+            sub="Held on the site's remote SQL Server — separate from the local app backup above"
           >
             {m.sql.databases.length > 0 ? (
               <div className="flex flex-wrap gap-1.5">
