@@ -39,24 +39,29 @@ icacls $d /grant "NT SERVICE\MSSQLSERVER:(OI)(CI)M"
 # If SQL runs under a named/domain service account, grant THAT account instead.
 ```
 
-### 2. Install Ola Hallengren (PowerShell, via dbatools)
+### 2. Install Ola Hallengren's backup **procedures** (PowerShell, via dbatools)
+Procedures only — **no `-InstallJobs`**. Current dbatools rejects `-InstallJobs`
+with any `-Solution` other than `All` (*"Jobs can only be created for all
+solutions"*), and we don't want the IndexOptimize/IntegrityCheck jobs anyway —
+`scripts/sql-backup-config.sql` creates exactly the two backup jobs we need.
 ```powershell
 Install-Module dbatools -Scope AllUsers -Force        # once per box; needs internet
 Install-DbaMaintenanceSolution -SqlInstance localhost `
   -Database master `
   -BackupLocation "C:\Cardoso Customer App\database\sql-backups" `
   -CleanupTime 220 `
-  -Solution Backup `
-  -InstallJobs
+  -Solution Backup
 ```
+This installs the `DatabaseBackup` procedure + `CommandLog` table in `master`.
 (Offline box: download `MaintenanceSolution.sql` from https://ola.hallengren.com,
-set `@BackupDirectory`/`@CleanupTime`/`@CreateJobs='Y'` at the top, run it against
-`master` in SSMS.)
+set `@CreateJobs='N'` and run it against `master` in SSMS.)
 
 ### 3. Recovery models + backup jobs (SSMS)
 Open `scripts/sql-backup-config.sql`, **confirm the DB names**, run it (F5).
-It sets all three DBs to SIMPLE and configures **FULL weekly (Sun 01:00)** +
-**DIFF nightly (Mon–Sat 01:00)** with 9-day local retention.
+It sets all three DBs to SIMPLE and **creates + configures** the two Agent jobs —
+**FULL weekly (Sun 01:00)** + **DIFF nightly (Mon–Sat 01:00)** with 9-day local
+retention. (It's the script — not dbatools — that creates the jobs, so it's fine
+that step 2 installed procedures only. Re-runnable.)
 
 If CARSYS (or any DB) was in FULL recovery its log may be bloated — reclaim it:
 ```sql
