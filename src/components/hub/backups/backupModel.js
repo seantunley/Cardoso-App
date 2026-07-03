@@ -115,11 +115,13 @@ export function normalizeSites({ backupStatus, hubBackupMap = {}, kopiaMap = {},
       bytes: kopia?.total_bytes ?? null,
     };
 
-    // Overall rollup excludes SQL (many sites legitimately have no SQL Server)
-    // and off-site when the feature is disabled, so those don't drag a healthy
-    // site to "unknown".
+    // Overall rollup: local + hub always; off-site only when the feature is on;
+    // SQL only when it's actually configured (status !== 'unavailable') so a
+    // site with NO SQL Server isn't dragged down, but a CONFIGURED SQL backup
+    // that's failed/stale DOES surface in the health + sort (Codex #514 P2).
     const rollup = [local.status, hubLayer.status];
     if (kopiaEnabled) rollup.push(offsite.status);
+    if (sql.status !== "unavailable") rollup.push(sql.status);
     const overallTone = site.error ? "critical" : worstTone(rollup);
 
     return {

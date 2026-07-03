@@ -170,7 +170,7 @@ export default function RestoreDialog({ site, source = "hub", demo, onClose }) {
                         {snap.integrity && <span className={`font-mono text-[10px] ${iCls}`}>{snap.integrity}</span>}
                       </div>
                       <div className="text-[10px] text-muted-foreground">
-                        {snap.mtime ? new Date(snap.mtime).toLocaleString() : "unknown"} · {sizeMb} MB{prev ? ` · ${prev}` : ""}
+                        {snap.mtime ? new Date(snap.mtime).toLocaleString() : "unknown"} · {sizeMb} MB{prev ? ` · ${prev}` : ""}{snap.incomplete ? " · partial" : ""}
                       </div>
                     </button>
                   );
@@ -186,6 +186,13 @@ export default function RestoreDialog({ site, source = "hub", demo, onClose }) {
             </label>
           )}
 
+          {/* An interrupted snapshot can't be restored — block both actions. */}
+          {selected?.incomplete && (
+            <div className="rounded-lg border border-status-critical/40 bg-status-critical/5 px-3 py-2 text-[11px] text-status-critical">
+              This snapshot is incomplete (interrupted) — its DB may be truncated, so it can't be restored. Pick a complete one.
+            </div>
+          )}
+
           {/* Off-site safe option */}
           {src.canStage && (
             <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-muted/20 px-3 py-2.5">
@@ -193,7 +200,7 @@ export default function RestoreDialog({ site, source = "hub", demo, onClose }) {
                 <div className="font-medium text-foreground">Stage &amp; download</div>
                 Extract the DB from Kopia and download it — the live site is untouched.
               </div>
-              <Button variant="outline" size="sm" className="h-8 shrink-0 text-xs" disabled={!selected || anyBusy} onClick={stageDownload}>
+              <Button variant="outline" size="sm" className="h-8 shrink-0 text-xs" disabled={!selected || selected?.incomplete || anyBusy} onClick={stageDownload}>
                 <Download className="mr-1.5 h-3.5 w-3.5" />{staging ? "Staging…" : "Stage & download"}
               </Button>
             </div>
@@ -217,7 +224,7 @@ export default function RestoreDialog({ site, source = "hub", demo, onClose }) {
               {pwError && <p className="text-xs text-status-critical">{pwError}</p>}
             </div>
             <div className="flex justify-end pt-1">
-              <Button variant="destructive" size="sm" onClick={pushRestore} disabled={anyBusy || !selected || !password}>
+              <Button variant="destructive" size="sm" onClick={pushRestore} disabled={anyBusy || !selected || selected?.incomplete || !password}>
                 <Upload className="mr-1.5 h-3.5 w-3.5" />
                 {busy ? "Pushing restore…" : tab === "offsite" ? "Push to live site" : "Yes, restore this site"}
               </Button>

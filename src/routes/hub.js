@@ -2990,6 +2990,9 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       const { snapshots } = await listHostSnapshots({ host });
       const snap = (snapshots || []).find((s) => s.id === snapshot_id);
       if (!snap || !snap.rootID) return res.status(404).json({ error: `Snapshot '${snapshot_id}' not found in the off-site repository for this site.` });
+      // An interrupted snapshot (incomplete=true) is a partial tree — its DB may
+      // be truncated/absent. Refuse to restore from it (Codex #514 P2).
+      if (snap.incomplete) return res.status(400).json({ error: `Snapshot '${snapshot_id}' is incomplete (interrupted) and cannot be restored. Choose a complete snapshot.` });
 
       const { dbPath, cleanup } = await extractSnapshotDb({ rootID: snap.rootID });
       logAudit({
@@ -3042,6 +3045,9 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       const { snapshots } = await listHostSnapshots({ host });
       const snap = (snapshots || []).find((s) => s.id === snapshot_id);
       if (!snap || !snap.rootID) return res.status(404).json({ error: `Snapshot '${snapshot_id}' not found in the off-site repository for this site.` });
+      // An interrupted snapshot (incomplete=true) is a partial tree — its DB may
+      // be truncated/absent. Refuse to restore from it (Codex #514 P2).
+      if (snap.incomplete) return res.status(400).json({ error: `Snapshot '${snapshot_id}' is incomplete (interrupted) and cannot be restored. Choose a complete snapshot.` });
 
       // Extract the DB, then stage it in the site's hub-backups folder under a
       // safe, timestamped name so the existing restore-fetch can serve it.
