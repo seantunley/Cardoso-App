@@ -14,6 +14,7 @@ import { recordJob, pruneOldJobRuns } from './lib/jobRunner.js';
 import { evaluateAllRules } from './lib/alertRules.js';
 import { pruneResolvedAlerts } from './lib/alertEngine.js';
 import { pruneOldRows, vacuumDb } from './lib/retention.js';
+import { selectPrunableBackups } from './lib/backupPrune.js';
 import { runScheduledMonthlyJob, runBootCatchUp } from './services/jti/jtiScheduler.js';
 import { getJtiSagePool } from './services/jti/jtiPool.js';
 import { pushPendingArchives } from './services/jti/jtiHubPush.js';
@@ -282,47 +283,31 @@ export async function runLocalBackup() {
       }
     }
 
-    // Prune: keep last 6 by default (one week of daily backups). Override
-    // via BACKUP_KEEP_COUNT env. Was 30 originally — but on a site that
-    // hits multi-GB cardoso.db (the production case that prompted PR #245),
-    // 30 daily backups = 30× the live DB size in idle storage, which adds
-    // up fast. The hub-side mirror in hub-backups/ provides the long-tail
-    // archive (its own retention controlled by HUB_BACKUP_KEEP_COUNT —
-    // see runHubBackupPull in services/hubEtl.js); the site itself only
-    // needs enough to recover from "yesterday looked weird, restore last
-    // week's snapshot" scenarios.
-    //
-    // NaN-guard: parseInt('abc', 10) returns NaN; default if so. 0 is
-    // honored (= prune all, including the just-created backup) so an
-    // operator who explicitly sets 0 doesn't get a silent fallback to 6.
-    // Negative values are nonsensical and fall back to default.
-    //
-    // Filter: ONLY canonical backup filenames `cardoso-<id>-YYYY-MM-DD-HH-MM-SS.db`
-    // get pruned. A forensic file like `cardoso.db.corrupt.db` (manually
-    // saved off when investigating a bad live DB) ALSO ends in `.db` and
-    // would otherwise be silently deleted by retention. The regex matches
-    // the timestamp suffix this code itself writes at line 156.
+    // Prune old backups by AGE — keep the last BACKUP_KEEP_DAYS days (default
+    // 3), but ALWAYS retain at least the newest 3 so a stalled backup job can
+    // never empty the folder. The selection is a unit-tested pure function
+    // (lib/backupPrune.js). The OLD count-based prune here silently never ran:
+    // its regex required a fully DASH-separated time (`-HH-MM-SS`) but the
+    // writer above emits an ISO 'T' (`THH-MM-SS`), so it matched nothing and
+    // backups grew without bound. JTI/BAT archives live under uploads/ and are
+    // never touched here.
     const { readdirSync, statSync, unlinkSync } = await import('fs');
-    const CANONICAL_BACKUP_RE = /^cardoso-.+-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}\.db$/;
-    const files = readdirSync(backupDir)
-      .filter((f) => CANONICAL_BACKUP_RE.test(f))
-      .map((f) => ({ name: f, mtime: statSync(path.join(backupDir, f)).mtimeMs }))
-      .sort((a, b) => b.mtime - a.mtime);
-
-    const parsedKeep = parseInt(process.env.BACKUP_KEEP_COUNT, 10);
-    const keep = Number.isFinite(parsedKeep) && parsedKeep >= 0 ? parsedKeep : 6;
-    files.slice(keep).forEach((f) => {
-      try { unlinkSync(path.join(backupDir, f.name)); } catch (e) { console.warn('[scheduler.backup.prune_db]', { file: f.name }, e.message); }
-      // Also drop the sibling .previews/ snapshot directory if present.
-      // Hardlinked files keep the underlying inode alive as long as any
-      // other snapshot (or the live previews dir) still references them,
-      // so this rm only frees disk if every other reference is also gone.
-      const siblingPreviews = path.join(backupDir, f.name.replace(/\.db$/, '.previews'));
+    const parsedDays = parseInt(process.env.BACKUP_KEEP_DAYS, 10);
+    const keepDays = Number.isFinite(parsedDays) && parsedDays >= 0 ? parsedDays : 3;
+    const entries = readdirSync(backupDir)
+      .filter((f) => f.endsWith('.db'))
+      .map((f) => ({ name: f, mtime: statSync(path.join(backupDir, f)).mtimeMs }));
+    const toDelete = selectPrunableBackups(entries, { keepDays, minKeep: 3 });
+    toDelete.forEach((name) => {
+      try { unlinkSync(path.join(backupDir, name)); } catch (e) { console.warn('[scheduler.backup.prune_db]', { file: name }, e.message); }
+      // Drop the sibling .previews/ snapshot dir too. Hardlinked files keep the
+      // underlying inode alive while any other snapshot still references them,
+      // so this only frees disk once every reference is gone.
+      const siblingPreviews = path.join(backupDir, name.replace(/\.db$/, '.previews'));
       try { rmSync(siblingPreviews, { recursive: true, force: true }); } catch (e) { console.warn('[scheduler.backup.prune_previews]', { siblingPreviews }, e.message); }
     });
-    const prunedCount = files.length > keep ? files.length - keep : 0;
-    if (prunedCount > 0) {
-      console.log(`[backup] Pruned ${prunedCount} old backup(s) and sibling preview snapshots, keeping ${keep}`);
+    if (toDelete.length > 0) {
+      console.log(`[backup] Pruned ${toDelete.length} backup(s) older than ${keepDays}d (kept last ${keepDays}d + newest 3); JTI/BAT untouched`);
     }
 
     // Return a summary so recordJob attaches it as the run's context — the
