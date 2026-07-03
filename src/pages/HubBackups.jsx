@@ -59,14 +59,17 @@ export default function HubBackups() {
     if (demo) {
       const d = buildDemoData();
       return {
-        models: normalizeSites({ backupStatus: d.backupStatus, hubBackupMap: d.hubBackupMap, kopiaMap: d.kopiaMap, kopiaEnabled: true }),
+        models: normalizeSites({ backupStatus: d.backupStatus, hubBackupMap: d.hubBackupMap, kopiaMap: d.kopiaMap, kopiaEnabled: true, hubKnown: true }),
         kopiaEnabled: true, kopiaError: null, kopiaUiUrl: d.ui_url, loading: false,
       };
     }
     const hubMap = Object.fromEntries((hubBackupData?.sites || []).map((s) => [s.site_id, s]));
     const kMap = Object.fromEntries((kopiaData?.sites || []).filter((s) => s.site_id).map((s) => [s.site_id, s]));
     return {
-      models: normalizeSites({ backupStatus: data, hubBackupMap: hubMap, kopiaMap: kMap, kopiaEnabled: !!kopiaData?.enabled }),
+      // hubKnown: the hub-copy query has actually resolved. Until it does (or
+      // if it errors and never yields data), don't let missing hub entries
+      // score as 'never' and paint healthy sites as Problems.
+      models: normalizeSites({ backupStatus: data, hubBackupMap: hubMap, kopiaMap: kMap, kopiaEnabled: !!kopiaData?.enabled, hubKnown: hubBackupData !== undefined }),
       kopiaEnabled: !!kopiaData?.enabled,
       kopiaError: kopiaData?.enabled && kopiaData?.error ? kopiaData.error : null,
       kopiaUiUrl: kopiaData?.ui_url || null,

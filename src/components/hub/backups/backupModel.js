@@ -62,8 +62,13 @@ function sqlStatusOf(site) {
  * @param {Record<string, object>} hubBackupMap
  * @param {Record<string, object>} kopiaMap
  * @param {boolean} kopiaEnabled
+ * @param {boolean} [hubKnown=true]  whether the hub-copy query has resolved.
+ *   While it's still loading or has errored, hubBackupMap is empty — a site
+ *   missing from it must read as 'unknown', NOT 'never', or every hub layer
+ *   scores critical and healthy sites flip to Problems until (or unless) that
+ *   query returns.
  */
-export function normalizeSites({ backupStatus, hubBackupMap = {}, kopiaMap = {}, kopiaEnabled = false }) {
+export function normalizeSites({ backupStatus, hubBackupMap = {}, kopiaMap = {}, kopiaEnabled = false, hubKnown = true }) {
   const sites = backupStatus?.sites || [];
   return sites.map((site) => {
     const id = site.site_id;
@@ -84,12 +89,13 @@ export function normalizeSites({ backupStatus, hubBackupMap = {}, kopiaMap = {},
     // surfaces instead of a green dot.
     const hubAgeH = hub?.hub_last_backup ? (Date.now() - new Date(hub.hub_last_backup).getTime()) / 3_600_000 : null;
     const hubStatus =
-      !hub || !(hub.hub_backup_count > 0) ? "never"
-        : hub.integrity === "corrupt" ? "corrupt"
-          : hubAgeH == null ? "unknown"
-            : hubAgeH > 48 ? "stale"
-              : hubAgeH > 25 ? "warning"
-                : "ok";
+      !hub ? (hubKnown ? "never" : "unknown")
+        : !(hub.hub_backup_count > 0) ? "never"
+          : hub.integrity === "corrupt" ? "corrupt"
+            : hubAgeH == null ? "unknown"
+              : hubAgeH > 48 ? "stale"
+                : hubAgeH > 25 ? "warning"
+                  : "ok";
     const hubLayer = {
       status: hubStatus,
       lastAt: hub?.hub_last_backup || null,
