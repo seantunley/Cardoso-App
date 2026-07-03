@@ -78,8 +78,20 @@ export function normalizeSites({ backupStatus, hubBackupMap = {}, kopiaMap = {},
       dbSize: site.db_size ?? null,
     };
 
+    // Hub copy: a copy existing isn't enough — a hub pull that stopped days ago
+    // leaves an OLD .db that must NOT read as healthy. Age the status the same
+    // way the local layer does (>25h overdue, >48h stale) so a stalled pull
+    // surfaces instead of a green dot.
+    const hubAgeH = hub?.hub_last_backup ? (Date.now() - new Date(hub.hub_last_backup).getTime()) / 3_600_000 : null;
+    const hubStatus =
+      !hub || !(hub.hub_backup_count > 0) ? "never"
+        : hub.integrity === "corrupt" ? "corrupt"
+          : hubAgeH == null ? "unknown"
+            : hubAgeH > 48 ? "stale"
+              : hubAgeH > 25 ? "warning"
+                : "ok";
     const hubLayer = {
-      status: hub ? (hub.integrity === "corrupt" ? "corrupt" : hub.hub_backup_count > 0 ? "ok" : "never") : "unknown",
+      status: hubStatus,
       lastAt: hub?.hub_last_backup || null,
       size: hub?.hub_last_size ?? null,
       count: hub?.hub_backup_count ?? 0,
