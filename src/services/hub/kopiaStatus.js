@@ -53,12 +53,15 @@ export function summarizeKopiaSnapshots(snapshots, { now = Date.now(), staleHour
     const t = tsStr ? new Date(tsStr).getTime() : NaN;
     const bytes = Number(s?.stats?.totalSize);
 
-    const cur = bySite.get(site) || { site, user: src.userName || null, count: 0, newestMs: -Infinity, newestStr: null, total_bytes: null };
+    const cur = bySite.get(site) || { site, user: src.userName || null, count: 0, newestMs: -Infinity, newestStr: null, total_bytes: null, newestRootID: null };
     cur.count += 1;
     if (Number.isFinite(t) && t > cur.newestMs) {
       cur.newestMs = t;
       cur.newestStr = tsStr;
       cur.total_bytes = Number.isFinite(bytes) ? bytes : cur.total_bytes;
+      // Root object of the newest snapshot — the handle the tree browser and
+      // the SQL-off-site check use to read INSIDE this site's latest backup.
+      cur.newestRootID = s?.rootEntry?.obj || null;
     }
     bySite.set(site, cur);
   }
@@ -76,6 +79,7 @@ export function summarizeKopiaSnapshots(snapshots, { now = Date.now(), staleHour
         total_bytes: c.total_bytes,
         status: stale ? 'critical' : 'ok',
         reason: ageHours == null ? 'no_valid_timestamp' : stale ? 'stale' : 'ok',
+        last_root_id: c.newestRootID,
       };
     })
     .sort((a, b) => a.site.localeCompare(b.site));
