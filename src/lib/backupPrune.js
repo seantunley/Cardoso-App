@@ -19,10 +19,13 @@
 // not `cardoso-` (dash), so they can never be selected. JTI/BAT archives live
 // under uploads/, not this folder, and aren't `.db` — untouched regardless.
 
-// A dated site backup: cardoso-<siteId>-<YYYY-MM-DD><sep><time>.db, where <sep>
-// is '-', '_' or 'T'. Anchored on a real YYYY-MM-DD date so non-backup .db
-// files can't match.
-export const BACKUP_FILE_RE = /^cardoso-.+-\d{4}-\d{2}-\d{2}[-_T]\d.*\.db$/i;
+// A dated site backup: cardoso-<siteId>-<YYYY-MM-DD><time>.db, where the time is
+// one of the three forms the writer has produced — `-HH-MM-SS`, `THH-MM-SS`, or
+// `_HHMMSS` — and `.db` must terminate the name IMMEDIATELY after it. That last
+// anchor matters: it rejects a forensic copy like
+// `cardoso-site-2026-07-03T02-00-02.db.corrupt.db` (which a looser `.*\.db$`
+// would still match and prune).
+export const BACKUP_FILE_RE = /^cardoso-.+-\d{4}-\d{2}-\d{2}(?:[-T]\d{2}-\d{2}-\d{2}|_\d{6})\.db$/i;
 
 /**
  * @param {Array<{ name: string, mtime: number }>} entries  every .db file in the backup dir

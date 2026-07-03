@@ -319,8 +319,8 @@ export async function runLocalBackup() {
       bytes: backupSize,
       previews_linked: linkedCount,
       previews_skipped: skippedCount,
-      pruned: prunedCount,
-      kept: keep,
+      pruned: toDelete.length,
+      kept_days: keepDays,
     };
   } catch (err) {
     console.error('[backup] Failed:', err.message);

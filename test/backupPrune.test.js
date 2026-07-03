@@ -23,6 +23,9 @@ describe('BACKUP_FILE_RE', () => {
     expect(BACKUP_FILE_RE.test('cardoso.db-wal')).toBe(false);
     expect(BACKUP_FILE_RE.test('something-else.db')).toBe(false);
     expect(BACKUP_FILE_RE.test('cardoso-site-notadate.db')).toBe(false);
+    // a forensic copy of a real backup — must NOT match (extra suffix after .db)
+    expect(BACKUP_FILE_RE.test('cardoso-site-2026-07-03T02-00-02.db.corrupt.db')).toBe(false);
+    expect(BACKUP_FILE_RE.test('cardoso-site-2026-07-03_020002.db.bak')).toBe(false);
   });
 });
 
