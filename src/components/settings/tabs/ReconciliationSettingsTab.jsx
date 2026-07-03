@@ -243,7 +243,7 @@ function OcrPauseToggle({ embedded = false }) {
       <div className="flex items-center justify-between">
         <p className="text-[10px] text-muted-foreground tabular-nums">
           Status:{' '}
-          <span className={paused ? 'text-destructive' : 'text-[hsl(145_55%_45%)]'}>
+          <span className={paused ? 'text-destructive' : 'text-status-ok'}>
             {paused ? '● Paused' : '● Running'}
           </span>
           {' · '}
@@ -255,12 +255,12 @@ function OcrPauseToggle({ embedded = false }) {
           className="px-4 py-2 border font-mono text-[10px] uppercase tracking-[0.2em] transition-colors disabled:opacity-50"
           style={{
             borderRadius: '12px',
-            borderColor: paused ? 'hsl(145 55% 45%)' : 'var(--phosphor)',
-            color: paused ? 'hsl(145 55% 45%)' : 'var(--phosphor)',
+            borderColor: paused ? 'hsl(var(--status-ok))' : 'var(--phosphor)',
+            color: paused ? 'hsl(var(--status-ok))' : 'var(--phosphor)',
             background: 'transparent',
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.background = paused ? 'hsla(145, 55%, 45%, 0.12)' : 'hsla(33, 95%, 55%, 0.12)';
+            e.currentTarget.style.background = paused ? 'hsl(var(--status-ok) / 0.12)' : 'hsla(33, 95%, 55%, 0.12)';
           }}
           onMouseLeave={(e) => {
             e.currentTarget.style.background = 'transparent';
@@ -337,14 +337,14 @@ function ReplicateSupplierTool({ embedded = false }) {
               borderRadius: '12px',
               borderColor: 'hsl(var(--destructive))',
               color: 'hsl(var(--destructive))',
-              background: 'hsla(0, 72%, 50%, 0.08)',
+              background: 'hsl(var(--status-critical) / 0.08)',
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'hsla(0, 72%, 50%, 0.18)';
-              e.currentTarget.style.boxShadow = '0 0 12px hsla(0, 72%, 50%, 0.35)';
+              e.currentTarget.style.background = 'hsl(var(--status-critical) / 0.18)';
+              e.currentTarget.style.boxShadow = '0 0 12px hsl(var(--status-critical) / 0.35)';
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'hsla(0, 72%, 50%, 0.08)';
+              e.currentTarget.style.background = 'hsl(var(--status-critical) / 0.08)';
               e.currentTarget.style.boxShadow = 'none';
             }}
           >
@@ -369,15 +369,15 @@ function ReplicateSupplierTool({ embedded = false }) {
                 borderRadius: '12px',
                 borderColor: 'hsl(var(--destructive))',
                 color: 'hsl(var(--destructive))',
-                background: 'hsla(0, 72%, 50%, 0.08)',
+                background: 'hsl(var(--status-critical) / 0.08)',
               }}
               onMouseEnter={(e) => {
                 if (e.currentTarget.disabled) return;
-                e.currentTarget.style.background = 'hsla(0, 72%, 50%, 0.18)';
-                e.currentTarget.style.boxShadow = '0 0 12px hsla(0, 72%, 50%, 0.35)';
+                e.currentTarget.style.background = 'hsl(var(--status-critical) / 0.18)';
+                e.currentTarget.style.boxShadow = '0 0 12px hsl(var(--status-critical) / 0.35)';
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'hsla(0, 72%, 50%, 0.08)';
+                e.currentTarget.style.background = 'hsl(var(--status-critical) / 0.08)';
                 e.currentTarget.style.boxShadow = 'none';
               }}
             >

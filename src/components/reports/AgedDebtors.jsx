@@ -12,11 +12,11 @@ import {
 } from './lib';
 
 const BUCKET_META = {
-  current:   { label: 'Current',     color: 'hsl(145 55% 45%)', sortOrder: 0 },
+  current:   { label: 'Current',     color: 'hsl(var(--status-ok))', sortOrder: 0 },
   '1-7':     { label: '1–7 days',    color: 'hsl(80 60% 45%)',  sortOrder: 1 },
-  '8-14':    { label: '8–14 days',   color: 'hsl(50 90% 55%)',  sortOrder: 2 },
+  '8-14':    { label: '8–14 days',   color: 'hsl(var(--status-warn))',  sortOrder: 2 },
   '15-21':   { label: '15–21 days',  color: 'hsl(33 95% 55%)',  sortOrder: 3 },
-  'over-21': { label: 'Over 21 days', color: 'hsl(0 72% 50%)',  sortOrder: 4 },
+  'over-21': { label: 'Over 21 days', color: 'hsl(var(--status-critical))',  sortOrder: 4 },
   unknown:   { label: 'No date',     color: 'hsl(220 8% 50%)',  sortOrder: 5 },
 };
 const BUCKET_ORDER = ['current', '1-7', '8-14', '15-21', 'over-21', 'unknown'];
@@ -205,7 +205,7 @@ export default function AgedDebtors() {
               label="Customers"
               value={summary.total_customers.toLocaleString('en-ZA')}
               sub={data?.truncated ? `truncated at ${data.truncated_at?.toLocaleString('en-ZA') || ''}` : undefined}
-              accent={data?.truncated ? 'hsl(0 72% 50%)' : 'var(--phosphor)'}
+              accent={data?.truncated ? 'hsl(var(--status-critical))' : 'var(--phosphor)'}
             />
             <SummaryTile label="Total Outstanding" value={<><span className="text-muted-subtle mr-1">R</span>{fmtRSigned(summary.total_outstanding)}</>} accent="var(--phosphor)" big />
             <SummaryTile label="1–7 days" value={<><span className="text-muted-subtle mr-1">R</span>{fmtRSigned(summary.buckets['1-7'])}</>} sub={`${summary.bucket_counts['1-7']} cust`} accent={BUCKET_META['1-7'].color} />

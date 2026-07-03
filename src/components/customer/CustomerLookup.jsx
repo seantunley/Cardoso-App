@@ -971,9 +971,9 @@ export default function CustomerLookup({
             // Customer flag colour is communicated via the left strip when set;
             // unflagged customers get a neutral border (no amber accent).
             borderLeftWidth: customer?.flag_color && customer.flag_color !== 'none' ? '3px' : '1px',
-            borderLeftColor: customer?.flag_color === 'red'    ? 'hsl(0 72% 50%)'
+            borderLeftColor: customer?.flag_color === 'red'    ? 'hsl(var(--status-critical))'
                             : customer?.flag_color === 'orange' ? 'var(--phosphor)'
-                            : customer?.flag_color === 'green'  ? 'hsl(145 55% 45%)'
+                            : customer?.flag_color === 'green'  ? 'hsl(var(--status-ok))'
                             : 'hsl(var(--border))',
             boxShadow: '0 24px 60px rgba(0,0,0,0.55)',
           }}

@@ -74,15 +74,15 @@ export default function ReconciliationSummary({ recon }) {
           label="Sage Total"
           value={<><span className="text-muted-subtle text-3xl mr-1.5">R</span>{fmt(recon.sage_total)}</>}
           sub={`${recon.creditNotes?.length || 0} credit note lines`}
-          accent="hsl(145 55% 45%)"
-          glow="hsla(145, 55%, 45%, 0.25)"
+          accent="hsl(var(--status-ok))"
+          glow="hsl(var(--status-ok) / 0.25)"
         />
         <Tile
           label="Variance"
           value={<><span className="text-muted-subtle text-3xl mr-1.5">R</span>{fmt(variance)}</>}
           sub={matched ? 'Perfect match' : variancePersonality || (variance > 0 ? 'BAT higher' : 'Sage higher')}
-          accent={matched ? 'hsl(145 55% 45%)' : 'hsl(var(--destructive))'}
-          glow={matched ? 'hsla(145, 55%, 45%, 0.25)' : 'hsla(0, 72%, 50%, 0.3)'}
+          accent={matched ? 'hsl(var(--status-ok))' : 'hsl(var(--destructive))'}
+          glow={matched ? 'hsl(var(--status-ok) / 0.25)' : 'hsl(var(--status-critical) / 0.3)'}
         />
         <Tile
           label="Needs Attention"
@@ -92,8 +92,8 @@ export default function ReconciliationSummary({ recon }) {
           sub={allClear
             ? `${stats.total || 0}/${stats.total || 0} invoices OK · 0 OCR fail · 0 dup`
             : `${needsAttention}/${stats.total || 0} invoices · ${(stats.notFound || 0) + (stats.failed || 0)} OCR fail · ${stats.duplicateExtractions || 0} dup`}
-          accent={needsAttention > 0 ? 'hsl(var(--destructive))' : 'hsl(145 55% 45%)'}
-          glow={needsAttention > 0 ? 'hsla(0, 72%, 50%, 0.3)' : 'hsla(145, 55%, 45%, 0.25)'}
+          accent={needsAttention > 0 ? 'hsl(var(--destructive))' : 'hsl(var(--status-ok))'}
+          glow={needsAttention > 0 ? 'hsl(var(--status-critical) / 0.3)' : 'hsl(var(--status-ok) / 0.25)'}
         />
       </div>
     </section>

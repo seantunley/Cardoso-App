@@ -14,11 +14,11 @@ import {
 // Sage A/P Aged Payables periods — MONTHLY (creditors age by due date), which
 // differs from the weekly A/R debtor scheme.
 const BUCKET_META = {
-  current:   { label: 'Current',      color: 'hsl(145 55% 45%)', sortOrder: 0 },
+  current:   { label: 'Current',      color: 'hsl(var(--status-ok))', sortOrder: 0 },
   '1-30':    { label: '1–30 days',    color: 'hsl(80 60% 45%)',  sortOrder: 1 },
-  '31-60':   { label: '31–60 days',   color: 'hsl(50 90% 55%)',  sortOrder: 2 },
+  '31-60':   { label: '31–60 days',   color: 'hsl(var(--status-warn))',  sortOrder: 2 },
   '61-90':   { label: '61–90 days',   color: 'hsl(33 95% 55%)',  sortOrder: 3 },
-  'over-90': { label: 'Over 90 days', color: 'hsl(0 72% 50%)',   sortOrder: 4 },
+  'over-90': { label: 'Over 90 days', color: 'hsl(var(--status-critical))',   sortOrder: 4 },
   unknown:   { label: 'No date',      color: 'hsl(220 8% 50%)',  sortOrder: 5 },
 };
 const BUCKET_ORDER = ['current', '1-30', '31-60', '61-90', 'over-90', 'unknown'];

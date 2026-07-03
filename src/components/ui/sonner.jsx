@@ -24,11 +24,11 @@ const Toaster = ({
 
         '--success-bg':      'hsl(145 35% 12%)',
         '--success-text':    'hsl(145 70% 75%)',
-        '--success-border':  'hsl(145 55% 45%)',
+        '--success-border':  'hsl(var(--status-ok))',
 
         '--error-bg':        'hsl(0 35% 12%)',
         '--error-text':      'hsl(0 75% 80%)',
-        '--error-border':    'hsl(0 72% 50%)',
+        '--error-border':    'hsl(var(--status-critical))',
 
         '--warning-bg':      'hsl(33 35% 10%)',
         '--warning-text':    'hsl(33 95% 75%)',

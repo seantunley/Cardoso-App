@@ -105,6 +105,20 @@
     --chart-3: 0 70% 42%;
     --chart-4: 210 60% 40%;
     --chart-5: 30 20% 40%;
+
+    /* Semantic status — the ONLY sanctioned colors for ok/warn/critical/stale
+       states (dots, badges, deltas, health chips). Use text-status-ok /
+       bg-status-warn/10 etc., or hsl(var(--status-ok)) in inline styles —
+       never raw green/red/yellow literals, which can't follow the theme.
+       ok replaces the hand-copied hsl(145 55% 45%) family (40% L passes AA
+       as text on both --background and --card); warn is legible goldenrod,
+       not unreadable-on-cream yellow; critical tracks --destructive so
+       "broken" and "dangerous action" stay the same red. stale is for data
+       that isn't wrong, just old — deliberately quiet. */
+    --status-ok: 145 55% 40%;
+    --status-warn: 45 90% 38%;
+    --status-critical: var(--destructive);
+    --status-stale: 30 12% 48%;
     --radius: 0.125rem;                /* sharp — 2px */
     --sidebar-background: 24 10% 8%;   /* sidebar always dark for contrast */
     --sidebar-foreground: 40 20% 85%;
@@ -156,6 +170,14 @@
     --chart-3: 0 88% 62%;
     --chart-4: 200 95% 65%;
     --chart-5: 30 45% 65%;
+
+    /* Status colors brighten on walnut the same way the charts do — a 40% L
+       green that reads on cream disappears on dark. critical follows the
+       vivid dark --destructive automatically. */
+    --status-ok: 145 65% 55%;
+    --status-warn: 50 95% 58%;
+    --status-critical: var(--destructive);
+    --status-stale: 32 15% 62%;
 
     --sidebar-background: 28 22% 12%;
     --sidebar-foreground: 40 35% 88%;

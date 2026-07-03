@@ -4,8 +4,8 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip
 import { getLedgerFortune } from '@/lib/fun';
 
 function statusMeta(status) {
-  if (status === 'completed') return { color: 'hsl(145 55% 45%)', glow: 'hsla(145, 55%, 45%, 0.3)', Icon: CheckCircle, label: 'Complete', tip: 'OCR extraction finished. Has not been compared against Sage credit notes yet.' };
-  if (status === 'error')     return { color: 'hsl(var(--destructive))', glow: 'hsla(0, 72%, 50%, 0.3)', Icon: AlertCircle, label: 'Error', tip: 'Something went wrong during OCR extraction. Check the per-week detail page for failed invoices and use Retry.' };
+  if (status === 'completed') return { color: 'hsl(var(--status-ok))', glow: 'hsl(var(--status-ok) / 0.3)', Icon: CheckCircle, label: 'Complete', tip: 'OCR extraction finished. Has not been compared against Sage credit notes yet.' };
+  if (status === 'error')     return { color: 'hsl(var(--destructive))', glow: 'hsl(var(--status-critical) / 0.3)', Icon: AlertCircle, label: 'Error', tip: 'Something went wrong during OCR extraction. Check the per-week detail page for failed invoices and use Retry.' };
   return                            { color: 'var(--phosphor)', glow: 'hsla(33, 95%, 55%, 0.3)', Icon: Clock, label: 'Pending', tip: 'OCR extraction is still in progress.' };
 }
 
@@ -57,16 +57,16 @@ export default function WeekSelector({ reconciliations, onSelect, onUnmarkZero }
           if (r.marked_zero_at) tipParts.push(`on ${new Date(r.marked_zero_at).toLocaleString('en-ZA')}`);
           if (r.marked_zero_note) tipParts.push(`— ${r.marked_zero_note}`);
           badge = {
-            color: 'hsl(145 55% 45%)',
-            glow: 'hsla(145, 55%, 45%, 0.4)',
+            color: 'hsl(var(--status-ok))',
+            glow: 'hsl(var(--status-ok) / 0.4)',
             Icon: MinusCircle,
             label: 'Zero',
             tip: tipParts.join(' '),
           };
         } else if (isMatched) {
-          badge = { color: 'hsl(145 55% 45%)', glow: 'hsla(145, 55%, 45%, 0.4)', Icon: CheckCircle, label: 'Matched', tip: 'BAT supplier total and Sage credit-note total agree to within R 0.01.' };
+          badge = { color: 'hsl(var(--status-ok))', glow: 'hsl(var(--status-ok) / 0.4)', Icon: CheckCircle, label: 'Matched', tip: 'BAT supplier total and Sage credit-note total agree to within R 0.01.' };
         } else if (isMismatched) {
-          badge = { color: 'hsl(var(--destructive))', glow: 'hsla(0, 72%, 50%, 0.4)', Icon: AlertTriangle, label: 'Mismatch', tip: `BAT and Sage totals differ by R ${variance.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}. Investigate fee-line differences.` };
+          badge = { color: 'hsl(var(--destructive))', glow: 'hsl(var(--status-critical) / 0.4)', Icon: AlertTriangle, label: 'Mismatch', tip: `BAT and Sage totals differ by R ${variance.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}. Investigate fee-line differences.` };
         } else if (awaitingSage) {
           badge = { color: 'hsl(280 70% 65%)', glow: 'hsla(280, 70%, 55%, 0.4)', Icon: CloudOff, label: 'Awaiting Credit Notes', tip: 'BAT spreadsheet has been uploaded but no matching credit notes have been posted in Sage 300 yet.' };
         } else {

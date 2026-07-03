@@ -191,8 +191,8 @@ function IntegrityOverviewPanel({ onSelectRecon }) {
   // fail. The amber "needs re-upload" call-out is a secondary signal
   // because pre-v72 recons skip Overview-dependent checks rather than
   // fail them.
-  const accent = allPassing ? 'hsl(145 55% 45%)' : 'hsl(var(--destructive))';
-  const accentGlow = allPassing ? 'hsla(145, 55%, 45%, 0.25)' : 'hsla(0, 72%, 50%, 0.25)';
+  const accent = allPassing ? 'hsl(var(--status-ok))' : 'hsl(var(--destructive))';
+  const accentGlow = allPassing ? 'hsl(var(--status-ok) / 0.25)' : 'hsl(var(--status-critical) / 0.25)';
 
   return (
     <div
@@ -246,7 +246,7 @@ function IntegrityOverviewPanel({ onSelectRecon }) {
                       type="button"
                       onClick={() => onSelectRecon(r.id)}
                       className="w-full flex items-baseline justify-between gap-3 px-3 py-2 hover:bg-muted/30 transition-colors text-left"
-                      style={{ borderRadius: '8px', border: '1px solid hsla(0, 72%, 50%, 0.3)', background: 'hsla(0, 72%, 50%, 0.04)' }}
+                      style={{ borderRadius: '8px', border: '1px solid hsl(var(--status-critical) / 0.3)', background: 'hsl(var(--status-critical) / 0.04)' }}
                     >
                       <span className="font-mono text-xs tabular-nums text-foreground">
                         W{String(r.week_number).padStart(2, '0')}/{r.year}
@@ -1162,8 +1162,8 @@ export default function Reconciliation() {
                   <div
                     className="absolute left-0 right-0 bottom-0 h-[2px]"
                     style={{
-                      background: weekStatus.lastWeekPaid ? 'hsl(145 55% 45%)' : 'hsl(var(--muted-foreground))',
-                      boxShadow: weekStatus.lastWeekPaid ? '0 0 12px hsla(145,55%,45%,0.3)' : 'none',
+                      background: weekStatus.lastWeekPaid ? 'hsl(var(--status-ok))' : 'hsl(var(--muted-foreground))',
+                      boxShadow: weekStatus.lastWeekPaid ? '0 0 12px hsl(var(--status-ok) / 0.3)' : 'none',
                     }}
                   />
                   <div>
@@ -1184,8 +1184,8 @@ export default function Reconciliation() {
                   <div
                     className="absolute left-0 right-0 bottom-0 h-[2px]"
                     style={{
-                      background: weekStatus.missingWeeks?.length > 0 ? 'hsl(var(--destructive))' : 'hsl(145 55% 45%)',
-                      boxShadow: weekStatus.missingWeeks?.length > 0 ? '0 0 12px hsla(0,72%,50%,0.3)' : '0 0 12px hsla(145,55%,45%,0.3)',
+                      background: weekStatus.missingWeeks?.length > 0 ? 'hsl(var(--destructive))' : 'hsl(var(--status-ok))',
+                      boxShadow: weekStatus.missingWeeks?.length > 0 ? '0 0 12px hsl(var(--status-critical) / 0.3)' : '0 0 12px hsl(var(--status-ok) / 0.3)',
                     }}
                   />
                   <div>
@@ -1217,7 +1217,7 @@ export default function Reconciliation() {
                         </div>
                       </>
                     ) : (
-                      <div className="font-display text-2xl leading-none" style={{ color: 'hsl(145 55% 45%)' }}>
+                      <div className="font-display text-2xl leading-none" style={{ color: 'hsl(var(--status-ok))' }}>
                         All paid
                       </div>
                     )}
@@ -1234,9 +1234,9 @@ export default function Reconciliation() {
               const ragColor = (sup, sage) => {
                 const signed = (sup || 0) - (sage || 0);
                 const d = Math.abs(signed);
-                if (d < 0.01) return 'hsl(145 55% 45%)';
+                if (d < 0.01) return 'hsl(var(--status-ok))';
                 // Credit notes exceeding BAT is not a shortfall — show green.
-                if (signed < 0) return 'hsl(145 55% 45%)';
+                if (signed < 0) return 'hsl(var(--status-ok))';
                 if (d < 100) return 'var(--phosphor)';
                 return 'hsl(var(--destructive))';
               };
@@ -1297,17 +1297,17 @@ export default function Reconciliation() {
                         onClick={() => setHideBalanced((v) => !v)}
                         className="group flex items-center gap-2 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.2em] transition-colors"
                         style={{
-                          color: hideBalanced ? 'hsl(145 55% 45%)' : 'hsl(var(--muted-foreground))',
-                          background: hideBalanced ? 'hsla(145, 55%, 45%, 0.08)' : 'transparent',
-                          border: hideBalanced ? '1px solid hsla(145, 55%, 45%, 0.5)' : '1px solid hsl(var(--border))',
+                          color: hideBalanced ? 'hsl(var(--status-ok))' : 'hsl(var(--muted-foreground))',
+                          background: hideBalanced ? 'hsl(var(--status-ok) / 0.08)' : 'transparent',
+                          border: hideBalanced ? '1px solid hsl(var(--status-ok) / 0.5)' : '1px solid hsl(var(--border))',
                           borderRadius: '12px',
                         }}
                       >
                         <span
                           className="inline-block w-3 h-3 flex-shrink-0 flex items-center justify-center"
                           style={{
-                            border: hideBalanced ? '1px solid hsl(145 55% 45%)' : '1px solid hsl(var(--border))',
-                            background: hideBalanced ? 'hsl(145 55% 45%)' : 'transparent',
+                            border: hideBalanced ? '1px solid hsl(var(--status-ok))' : '1px solid hsl(var(--border))',
+                            background: hideBalanced ? 'hsl(var(--status-ok))' : 'transparent',
                             borderRadius: '12px',
                           }}
                         >
@@ -1345,7 +1345,7 @@ export default function Reconciliation() {
                           // Credit notes covering or exceeding BAT is not a shortfall.
                           const creditCoversBat = totalDiff <= 0.01;
                           const headerColor = worst < 0.01 || creditCoversBat
-                            ? 'hsl(145 55% 45%)'
+                            ? 'hsl(var(--status-ok))'
                             : worst < 100
                               ? 'var(--phosphor)'
                               : 'hsl(var(--destructive))';
@@ -1383,14 +1383,14 @@ export default function Reconciliation() {
                                     {row.marked_zero && (
                                       <span
                                         className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] uppercase tracking-[0.15em] cursor-default"
-                                        style={{ color: 'hsl(145 55% 45%)', border: '1px solid hsla(145, 55%, 45%, 0.4)', background: 'hsla(145, 55%, 45%, 0.08)' }}
+                                        style={{ color: 'hsl(var(--status-ok))', border: '1px solid hsl(var(--status-ok) / 0.4)', background: 'hsl(var(--status-ok) / 0.08)' }}
                                         title={`Marked zero by ${row.marked_zero_by || 'unknown'} on ${row.marked_zero_at ? new Date(row.marked_zero_at).toLocaleString('en-ZA') : 'unknown date'}${row.marked_zero_note ? ` — ${row.marked_zero_note}` : ''}`}
                                       >
                                         ZERO
                                       </span>
                                     )}
                                   </div>
-                                  <div className="font-mono text-[9px] uppercase tracking-[0.15em] mt-0.5" style={{ color: row.sage_present ? 'hsl(145 55% 45%)' : 'hsl(var(--muted-foreground))' }}>
+                                  <div className="font-mono text-[9px] uppercase tracking-[0.15em] mt-0.5" style={{ color: row.sage_present ? 'hsl(var(--status-ok))' : 'hsl(var(--muted-foreground))' }}>
                                     {row.sage_present ? `${row.batch_count} batch${row.batch_count !== 1 ? 'es' : ''}` : 'no sage'}
                                   </div>
                                   {row.marked_zero && (
@@ -1627,17 +1627,17 @@ export default function Reconciliation() {
                       onClick={() => setHideMatched(!hideMatched)}
                       className="inline-flex items-center gap-2 px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-[0.2em] transition-colors"
                       style={{
-                        color: hideMatched ? 'hsl(145 55% 45%)' : 'hsl(var(--muted-foreground))',
-                        background: hideMatched ? 'hsla(145, 55%, 45%, 0.08)' : 'transparent',
-                        border: hideMatched ? '1px solid hsla(145, 55%, 45%, 0.5)' : '1px solid hsl(var(--border))',
+                        color: hideMatched ? 'hsl(var(--status-ok))' : 'hsl(var(--muted-foreground))',
+                        background: hideMatched ? 'hsl(var(--status-ok) / 0.08)' : 'transparent',
+                        border: hideMatched ? '1px solid hsl(var(--status-ok) / 0.5)' : '1px solid hsl(var(--border))',
                         borderRadius: '12px',
                       }}
                     >
                       <span
                         className="inline-block w-3 h-3 flex-shrink-0"
                         style={{
-                          border: hideMatched ? '1px solid hsl(145 55% 45%)' : '1px solid hsl(var(--border))',
-                          background: hideMatched ? 'hsl(145 55% 45%)' : 'transparent',
+                          border: hideMatched ? '1px solid hsl(var(--status-ok))' : '1px solid hsl(var(--border))',
+                          background: hideMatched ? 'hsl(var(--status-ok))' : 'transparent',
                           borderRadius: '1px',
                           position: 'relative',
                         }}
@@ -1740,7 +1740,7 @@ export default function Reconciliation() {
                   return (
                   <>
                     <div className="grid gap-3 sm:grid-cols-5 stagger-in">
-                      <MatchTile label="Matched" value={cardosoMatch.stats.matched} color="hsl(145 55% 45%)" />
+                      <MatchTile label="Matched" value={cardosoMatch.stats.matched} color="hsl(var(--status-ok))" />
                       <MatchTile label="Auto-Corrected" value={cardosoMatch.stats.autoCorrections || 0} color="hsl(200 80% 55%)" />
                       <MatchTile label="Amount Mismatches" value={cardosoMatch.stats.mismatches} color="var(--phosphor)" />
                       <MatchTile label="BAT Only" value={cardosoMatch.stats.unmatchedSupplier} color="hsl(var(--muted-foreground))" />
@@ -1825,7 +1825,7 @@ export default function Reconciliation() {
                                   return dc > 1 ? (
                                     <Tooltip>
                                       <TooltipTrigger asChild>
-                                        <span className="ml-1.5 font-mono text-[9px] uppercase tracking-[0.15em] px-1 py-0.5 cursor-help" style={{ color: 'hsl(var(--destructive))', background: 'hsla(0, 72%, 50%, 0.12)', border: '1px solid hsla(0, 72%, 50%, 0.4)', borderRadius: '12px' }}>×{dc} dup</span>
+                                        <span className="ml-1.5 font-mono text-[9px] uppercase tracking-[0.15em] px-1 py-0.5 cursor-help" style={{ color: 'hsl(var(--destructive))', background: 'hsl(var(--status-critical) / 0.12)', border: '1px solid hsl(var(--status-critical) / 0.4)', borderRadius: '12px' }}>×{dc} dup</span>
                                       </TooltipTrigger>
                                       <TooltipContent>This invoice number appears on {dc} different POD extractions — at least {dc - 1} are wrong.</TooltipContent>
                                     </Tooltip>
@@ -1836,7 +1836,7 @@ export default function Reconciliation() {
                                 <span className="inline-flex items-center gap-1.5">
                                   <span>{r.week_number ? `W${r.week_number}/${r.year}` : '—'}</span>
                                   {r.delivery_date && parseInt(r.delivery_date) < new Date().getFullYear() && (
-                                    <span className="font-mono text-[9px] uppercase tracking-[0.15em] px-1.5 py-0.5" style={{ color: 'hsl(0 72% 65%)', background: 'hsla(0,72%,50%,0.1)' }}>Delivered last year</span>
+                                    <span className="font-mono text-[9px] uppercase tracking-[0.15em] px-1.5 py-0.5" style={{ color: 'hsl(var(--status-critical))', background: 'hsl(var(--status-critical) / 0.1)' }}>Delivered last year</span>
                                   )}
                                 </span>
                               </td>
@@ -1865,7 +1865,7 @@ export default function Reconciliation() {
                                 {r.cardoso_del_fee != null ? `R ${r.cardoso_del_fee.toFixed(2)}` : '—'}
                               </td>
                               <td className="px-2 py-1.5 text-right font-mono tabular-nums" style={{
-                                color: r.difference == null ? 'hsl(var(--muted-foreground))' : Math.abs(r.difference) < 0.01 ? 'hsl(145 55% 45%)' : 'hsl(var(--destructive))',
+                                color: r.difference == null ? 'hsl(var(--muted-foreground))' : Math.abs(r.difference) < 0.01 ? 'hsl(var(--status-ok))' : 'hsl(var(--destructive))',
                               }}>
                                 {r.difference != null ? `R ${r.difference.toFixed(2)}` : '—'}
                               </td>
@@ -1874,7 +1874,7 @@ export default function Reconciliation() {
                                   r.amount_mismatch ? (
                                     <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-accent">◐ Mismatch</span>
                                   ) : (
-                                    <span className="font-mono text-[10px] uppercase tracking-[0.15em]" style={{ color: 'hsl(145 55% 45%)' }}>● Match</span>
+                                    <span className="font-mono text-[10px] uppercase tracking-[0.15em]" style={{ color: 'hsl(var(--status-ok))' }}>● Match</span>
                                   )
                                 ) : r.extraction_id ? (
                                   <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground">○ BAT only</span>
@@ -1920,9 +1920,9 @@ export default function Reconciliation() {
                   className="relative overflow-hidden border-2 px-5 py-4"
                   style={{
                     borderColor: 'hsl(var(--destructive))',
-                    background: 'hsla(0, 72%, 50%, 0.08)',
+                    background: 'hsl(var(--status-critical) / 0.08)',
                     borderRadius: '12px',
-                    boxShadow: '0 0 18px hsla(0, 72%, 50%, 0.2)',
+                    boxShadow: '0 0 18px hsl(var(--status-critical) / 0.2)',
                   }}
                 >
                   <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-destructive font-semibold mb-2">
@@ -2000,7 +2000,7 @@ export default function Reconciliation() {
               <div className="relative overflow-hidden border border-border bg-card px-4 py-3" style={{ borderRadius: '12px' }}>
                 <div
                   className="absolute left-0 top-0 bottom-0 w-[2px]"
-                  style={{ background: 'hsl(var(--destructive))', boxShadow: '0 0 10px hsla(0,72%,50%,0.3)' }}
+                  style={{ background: 'hsl(var(--destructive))', boxShadow: '0 0 10px hsl(var(--status-critical) / 0.3)' }}
                 />
                 <p className="font-mono text-xs text-destructive pl-2">{extractError}</p>
               </div>
@@ -2219,7 +2219,7 @@ export default function Reconciliation() {
                       toast.info('Cancellation requested…');
                     } catch (e) { toast.error(humanizeApiError(e, "cancel generation")); }
                   }}
-                  className="px-4 py-2 border border-destructive bg-transparent text-destructive font-mono text-[10px] uppercase tracking-[0.2em] hover:bg-[hsla(0,72%,50%,0.18)] hover:shadow-[0_0_12px_hsla(0,72%,50%,0.35)] transition-colors"
+                  className="px-4 py-2 border border-destructive bg-transparent text-destructive font-mono text-[10px] uppercase tracking-[0.2em] hover:bg-status-critical/[0.18] hover:shadow-[0_0_12px_hsl(var(--status-critical)/0.35)] transition-colors"
                   style={{ borderRadius: '12px' }}
                 >
                   Cancel

@@ -148,7 +148,7 @@ export default function HubJti() {
           >
             <div
               className="absolute left-0 top-0 bottom-0 w-[2px]"
-              style={{ background: 'hsl(var(--destructive))', boxShadow: '0 0 10px hsla(0,72%,50%,0.3)' }}
+              style={{ background: 'hsl(var(--destructive))', boxShadow: '0 0 10px hsl(var(--status-critical) / 0.3)' }}
             />
             <p className="font-mono text-xs text-destructive pl-2 flex items-start gap-2">
               <AlertTriangle className="h-3.5 w-3.5 mt-px flex-shrink-0" strokeWidth={1.75} />
