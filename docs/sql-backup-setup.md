@@ -10,12 +10,15 @@ backup. Ola Hallengren makes the SQL backups; Kopia does the copy + dedup + GFS.
   stored uncompressed on the box. So **backup compression stays on.**
 - Compressed fulls **dedup poorly** in Kopia, so a nightly *full* would push
   ~10 GB off-site every night. Instead: **weekly FULL (Saturday 22:00) + nightly
-  DIFF (Sun–Fri 01:00).** The diff is only what changed since the full — small —
+  DIFF (Mon–Sat 01:00).** The diff is only what changed since the full — small —
   so the nightly off-site upload is small; the 10 GB full moves once a week.
-- **Timing matters:** the Kopia agent snapshots the app folder at **02:30**. Both
-  SQL jobs must *finish* before then, or Kopia can capture a `.bak` mid-write. The
+- **Timing matters:** the Kopia agent snapshots the app folder at **02:30**. Every
+  SQL job must *finish* before then, or Kopia can capture a `.bak` mid-write. The
   DIFF (01:00, small) finishes in minutes; the big FULL runs **Saturday 22:00** so
-  it has ~4.5 h of headroom before the Sunday 02:30 snapshot carries it off-site.
+  it has ~4.5 h of headroom before the Sunday 02:30 snapshot. **Sunday has no DIFF
+  on purpose** — a Sunday 01:00 diff would sit only ~3 h after the Saturday full
+  and could overlap it; Sunday's off-site point is the fresh Saturday full, and
+  Monday's diff picks up Sunday's changes.
 - The `.bak`s land in `C:\Cardoso Customer App\database\sql-backups`, which is
   **inside the folder the Kopia agent snapshots** and **not** in `.kopiaignore`,
   so they ride off-site automatically. Kopia dedups + GFS-retains from the hub;
@@ -63,7 +66,7 @@ set `@CreateJobs='N'` and run it against `master` in SSMS.)
 ### 3. Recovery models + backup jobs (SSMS)
 Open `scripts/sql-backup-config.sql`, **confirm the DB names**, run it (F5).
 It sets all three DBs to SIMPLE and **creates + configures** the two Agent jobs —
-**FULL weekly (Sat 22:00)** + **DIFF nightly (Sun–Fri 01:00)** with 9-day local
+**FULL weekly (Sat 22:00)** + **DIFF nightly (Mon–Sat 01:00)** with 9-day local
 retention, timed to finish before the 02:30 Kopia snapshot. (It's the script —
 not dbatools — that creates the jobs, so it's fine that step 2 installed
 procedures only. Re-runnable.)
@@ -74,21 +77,34 @@ USE CARSYS; DBCC SHRINKFILE (2, 200);   -- file 2 is the log on a standard DB
 ```
 
 ### 4. Kopia GFS retention (PowerShell — set the slug)
+> ⚠ **Run kopia as the account the agent uses.** The repository connection is
+> cached **per Windows user**, and the `CardosoKopiaAgent` task runs as **SYSTEM**
+> (see `scripts/kopia-agent-setup.ps1`). An interactive admin shell is *not*
+> connected — a raw `kopia …` there fails with *"repository not connected."* Run
+> kopia commands **as SYSTEM** via PsExec:
 ```powershell
-& "C:\Cardoso Customer App\kopia\kopia.exe" policy set "cardoso@<SLUG>:C:\Cardoso Customer App" `
+# -s = run as SYSTEM (the connected account); PsExec64 from Sysinternals.
+PsExec64.exe -s "C:\Cardoso Customer App\kopia\kopia.exe" policy set `
+  "cardoso@<SLUG>:C:\Cardoso Customer App" `
   --keep-daily 7 --keep-weekly 4 --keep-monthly 12 --keep-annual 3
 ```
 `keep-daily`=son · `keep-weekly`=father · `keep-monthly`=grandfather · +annual long-tail.
 
 ### 5. Seed the baseline + verify
-Run the FULL job once for the off-site baseline, then push it:
+Run the FULL job once for the off-site baseline, then push it by **triggering the
+registered agent task** (it runs as SYSTEM and is already connected — no PsExec
+needed, and it's exactly what runs nightly):
 ```powershell
-# in SSMS: right-click 'DatabaseBackup - USER_DATABASES - FULL' → Start Job
-# then, on the site:
-& "C:\Cardoso Customer App\kopia\kopia.exe" snapshot create "C:\Cardoso Customer App"
+# in SSMS: right-click 'DatabaseBackup - USER_DATABASES - FULL' → Start Job; wait
+#   for it to finish (Job Activity Monitor), then on the site:
+Start-ScheduledTask -TaskName 'CardosoKopiaAgent'
 ```
+(If you must snapshot by hand instead, run it as SYSTEM:
+`PsExec64.exe -s "C:\Cardoso Customer App\kopia\kopia.exe" snapshot create "C:\Cardoso Customer App"`.)
+
 On the hub → **Backups → the site → View snapshots**: the newest snapshot should
-be bigger (it swept up the `.bak`s). That confirms SQL is going off-site.
+be bigger (it swept up the `.bak`s), and the **SQL backups** panel should turn
+green. That confirms SQL is going off-site.
 
 ---
 
