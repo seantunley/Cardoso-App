@@ -16,6 +16,7 @@ import { syncAllSites, syncSite, runHubBackupPull, pullBackupForSite, HUB_SITES 
 import { runConnectionImport } from '../services/syncEngine.js';
 import { getHubStorageRuntime } from '../hub/storage/runtime.js';
 import { getKopiaStatus, isKopiaEnabled, listHostSnapshots, normalizeKopiaHost } from '../services/hub/kopiaStatus.js';
+import { extractSnapshotDb } from '../services/hub/kopiaRestore.js';
 import { logError } from '../lib/errorLog.js';
 import { safeTokenEqual } from '../lib/safeEqual.js';
 import { logAudit } from '../lib/audit.js';
@@ -2967,6 +2968,131 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         status: 'failure',
       });
       res.status(502).json({ ok: false, error: friendly });
+    }
+  });
+
+  // POST /api/hub/sites/:siteId/kopia-restore-stage
+  // Off-site restore, SAFE mode: extract the chosen Kopia snapshot's DB to a hub
+  // staging folder and stream it back as a download. Never touches the live
+  // site — the operator places it deliberately. Admin-only.
+  router.post('/api/hub/sites/:siteId/kopia-restore-stage', requireAuth, requireAdmin, async (req, res) => {
+    const { siteId } = req.params;
+    const { snapshot_id } = req.body || {};
+    try {
+      if (!isKopiaEnabled()) return res.status(400).json({ error: 'Off-site (Kopia) backups are not enabled on this hub.' });
+      if (!snapshot_id) return res.status(400).json({ error: 'snapshot_id is required.' });
+      const site = db.prepare('SELECT id, slug, name FROM hub_sites WHERE id = ?').get(siteId);
+      if (!site) return res.status(404).json({ error: `Site '${siteId}' not found` });
+      const allowed = getAllowedSiteIds(req, res);
+      if (allowed !== null && !allowed.has(site.id)) return res.status(403).json({ error: 'Not permitted for this site' });
+
+      const host = normalizeKopiaHost(site);
+      const { snapshots } = await listHostSnapshots({ host });
+      const snap = (snapshots || []).find((s) => s.id === snapshot_id);
+      if (!snap || !snap.rootID) return res.status(404).json({ error: `Snapshot '${snapshot_id}' not found in the off-site repository for this site.` });
+
+      const { dbPath, cleanup } = await extractSnapshotDb({ rootID: snap.rootID });
+      logAudit({
+        req, action: 'hub_offsite_stage', resourceType: 'site', resourceId: site.id, resourceName: site.name || site.slug,
+        details: `Staged off-site snapshot ${snapshot_id} for download`, status: 'success',
+      });
+
+      let cleaned = false;
+      const cleanupOnce = () => { if (!cleaned) { cleaned = true; cleanup(); } };
+      const downloadName = `cardoso-offsite-${site.slug || site.id}-${String(snapshot_id).slice(0, 12)}.db`;
+      res.setHeader('Content-Type', 'application/octet-stream');
+      res.setHeader('Content-Disposition', `attachment; filename="${downloadName}"`);
+      res.setHeader('Cache-Control', 'no-store');
+      const stream = fs.createReadStream(dbPath);
+      stream.on('error', (err) => { console.error('[hub.offsite-stage] stream error:', err.message); try { res.destroy(err); } catch { /* noop */ } cleanupOnce(); });
+      res.on('close', cleanupOnce);
+      stream.pipe(res);
+    } catch (err) {
+      const friendly = err.message || 'Off-site stage failed';
+      logError('hub.offsite_stage', err, { site_id: siteId, friendly });
+      if (!res.headersSent) res.status(502).json({ error: friendly });
+    }
+  });
+
+  // POST /api/hub/sites/:siteId/restore-offsite
+  // Off-site restore, PUSH mode (DESTRUCTIVE): extract the snapshot's DB from
+  // Kopia, stage it in the site's hub-backups folder, then reuse the exact
+  // one-shot-token push as /restore so the site stops, swaps, integrity-checks
+  // and auto-rolls-back. Admin + password.
+  router.post('/api/hub/sites/:siteId/restore-offsite', requireAuth, requireAdmin, async (req, res) => {
+    const { siteId } = req.params;
+    const { snapshot_id, password } = req.body || {};
+    let stagedPath = null;
+    let extractCleanup = null;
+    try {
+      if (!isKopiaEnabled()) return res.status(400).json({ error: 'Off-site (Kopia) backups are not enabled on this hub.' });
+      if (!password) return res.status(400).json({ error: 'Password is required to initiate a restore.' });
+      if (!snapshot_id) return res.status(400).json({ error: 'snapshot_id is required.' });
+      const site = db.prepare('SELECT id, slug, name, url, token FROM hub_sites WHERE id = ?').get(siteId);
+      if (!site) return res.status(404).json({ error: `Site '${siteId}' not found` });
+      if (!site.url || !site.token) return res.status(400).json({ error: `Site '${site.slug}' has no URL or token configured — cannot push a restore.` });
+      const allowed = getAllowedSiteIds(req, res);
+      if (allowed !== null && !allowed.has(site.id)) return res.status(403).json({ error: 'Not permitted for this site' });
+
+      const user = db.prepare('SELECT * FROM "user" WHERE id = ?').get(req.currentUser.id);
+      if (!user || !user.password_hash) return res.status(401).json({ error: 'Unable to verify your password.' });
+      if (!(await bcrypt.compare(password, user.password_hash))) return res.status(401).json({ error: 'Incorrect password.' });
+
+      const host = normalizeKopiaHost(site);
+      const { snapshots } = await listHostSnapshots({ host });
+      const snap = (snapshots || []).find((s) => s.id === snapshot_id);
+      if (!snap || !snap.rootID) return res.status(404).json({ error: `Snapshot '${snapshot_id}' not found in the off-site repository for this site.` });
+
+      // Extract the DB, then stage it in the site's hub-backups folder under a
+      // safe, timestamped name so the existing restore-fetch can serve it.
+      const extracted = await extractSnapshotDb({ rootID: snap.rootID });
+      extractCleanup = extracted.cleanup;
+      const ts = snap.endTime ? new Date(snap.endTime) : new Date();
+      const stamp = ts.toISOString().slice(0, 19).replace(/[T:]/g, '-'); // YYYY-MM-DD-HH-MM-SS
+      const stagedName = `cardoso-${site.id}-offsite-${stamp}.db`;
+      if (!isSafeBackupFilename(stagedName)) throw new Error('Internal: generated staged filename failed the safety check.');
+      const snapDir = resolveSiteBackupDir(path.join(process.cwd(), 'database', 'hub-backups'), site);
+      fs.mkdirSync(snapDir, { recursive: true });
+      stagedPath = path.join(snapDir, stagedName);
+      fs.copyFileSync(extracted.dbPath, stagedPath);
+      extractCleanup(); extractCleanup = null; // temp extraction no longer needed
+
+      // ── Reuse the /restore push machinery (one-shot token, site pulls) ──
+      const dbToken = mintRestoreToken(siteId, stagedName);
+      const restoreId = crypto.randomBytes(8).toString('hex');
+      const hubUrl = process.env.HUB_URL || `${req.protocol}://${req.get('host')}`;
+      const r = await fetch(`${site.url}/api/hub/restore`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Reporting-Token': site.token },
+        signal: AbortSignal.timeout(10 * 60 * 1000),
+        body: JSON.stringify({
+          restore_id: restoreId,
+          hub_url: hubUrl.replace(/\/$/, ''),
+          snapshot: { filename: stagedName, token: dbToken },
+          previews: null, jti_archive: null, bat_archive: null, env: null,
+        }),
+      });
+      const body = await r.json().catch(() => ({}));
+      logAudit({
+        req, action: 'hub_offsite_restore', resourceType: 'site', resourceId: site.id, resourceName: site.name || site.slug,
+        details: `Pushed OFF-SITE snapshot ${snapshot_id} (staged ${stagedName}) to ${site.url}. Site response: ${r.status} ${body.message || body.error || ''}`,
+        changes: { restore_id: restoreId, snapshot_id, staged_filename: stagedName, site_response_status: r.status },
+        status: r.ok ? 'success' : 'failure',
+      });
+
+      // Push is synchronous (the site has fetched by now) — drop the staged copy
+      // so it doesn't show up in the hub-pull snapshot list.
+      try { fs.unlinkSync(stagedPath); } catch (e) { console.warn('[hub.offsite-restore] staged cleanup:', e.message); }
+      stagedPath = null;
+
+      if (!r.ok) return res.status(r.status).json({ ok: false, error: body.error || `HTTP ${r.status}`, ...body });
+      res.json({ ok: true, restore_id: restoreId, ...body });
+    } catch (err) {
+      if (extractCleanup) { try { extractCleanup(); } catch { /* noop */ } }
+      if (stagedPath) { try { fs.unlinkSync(stagedPath); } catch { /* noop */ } }
+      const friendly = err.message || 'Off-site restore failed';
+      logError('hub.offsite_restore', err, { site_id: siteId, friendly });
+      if (!res.headersSent) res.status(502).json({ ok: false, error: friendly });
     }
   });
 
