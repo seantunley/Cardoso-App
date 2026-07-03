@@ -8,7 +8,7 @@ import { createRequire } from 'module';
 const _require = createRequire(import.meta.url);
 const { version: APP_VERSION } = _require('../../package.json');
 import db from '../db/index.js';
-import { rebuildInventorySalesRollups } from '../services/inventoryMovement.js';
+import { rebuildInventorySalesRollups, awaitInFlightSalesSync } from '../services/inventoryMovement.js';
 import { reportingRateLimiter } from '../middleware/rateLimit.js';
 import { logError } from '../lib/errorLog.js';
 import { isoYear, currentIsoWeek, weeksInIsoYear } from '../lib/isoWeek.js';
@@ -3533,8 +3533,14 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   // (even when the rollup is legitimately empty), and the rebuild fits inside the
   // hub's fetch timeout so the pull still succeeds with real data.
   let salesRollupWarmAttempted = false;
-  const ensureSalesRollupWarm = () => {
-    if (salesRollupWarmAttempted) return;
+  let salesRollupWarmInFlight = null;
+  const _warmSalesRollupOnce = async () => {
+    // If a sales sync is running, wait for it FIRST. Its final step rebuilds the
+    // rollups against freshly-swapped transaction data — so afterwards the
+    // emptiness check below finds them populated and we don't kick off a second
+    // rebuild that would read pre/mid-swap data and let the hub delete-and-
+    // replace from stale rollups. (Swallows a sync failure; we re-check below.)
+    await awaitInFlightSalesSync();
     const itemEmpty = !prep('SELECT 1 FROM inventory_item_sales_rollup LIMIT 1').get();
     const custEmpty = !prep('SELECT 1 FROM inventory_customer_sales_rollup LIMIT 1').get();
     if (itemEmpty && custEmpty && prep('SELECT 1 FROM inventory_sales_transactions LIMIT 1').get()) {
@@ -3542,18 +3548,35 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
       // returns 500, the hub treats it as a failed pull and SKIPS its
       // delete-and-replace, so it keeps the existing valid hub data instead of
       // wiping it with an empty set. The once-flag is set only after success
-      // (below), so the next hub pull retries the rebuild.
-      rebuildInventorySalesRollups();
+      // (below), so the next hub pull retries the rebuild. Awaited: the rebuild
+      // now chunks + yields (async), and callers must have the rollup fully
+      // built before they read it — and a throw must still reach the route's
+      // catch to 500.
+      await rebuildInventorySalesRollups();
     }
     salesRollupWarmAttempted = true;
+  };
+  const ensureSalesRollupWarm = async () => {
+    if (salesRollupWarmAttempted) return;
+    // Coalesce concurrent cold-cache warm-ups onto ONE run. Two reporting pulls
+    // (e.g. overlapping hub/manual resyncs) can both reach here while the once-
+    // flag is still false; without sharing, each would queue its own full
+    // rebuildInventorySalesRollups() — and since the rebuild CHAIN serialises
+    // (not coalesces), the second would run a wholly redundant rebuild after the
+    // first already populated the rollups. Share the in-flight promise so a
+    // failure still reaches every awaiting route's catch (→ 500).
+    if (!salesRollupWarmInFlight) {
+      salesRollupWarmInFlight = _warmSalesRollupOnce().finally(() => { salesRollupWarmInFlight = null; });
+    }
+    await salesRollupWarmInFlight;
   };
 
   // Per-item monthly sales with inter-branch transfers EXCLUDED — the hub pulls
   // this for the Top Items + Dead Stock tiles. Description comes from the sales
   // cache (v096) falling back to the item master. Trailing 24 months.
-  router.get('/api/reporting/inventory-item-sales', reportingRateLimiter, requireReportingToken, (req, res) => {
+  router.get('/api/reporting/inventory-item-sales', reportingRateLimiter, requireReportingToken, async (req, res) => {
     try {
-      ensureSalesRollupWarm();
+      await ensureSalesRollupWarm();
       const { limit, offset } = pagination(req, { defaultLimit: 5000, maxLimit: 20000 });
       // Served from the precomputed rollup cache (rebuilt once per inventory-sales
       // sync) — a cheap indexed SELECT, never an on-demand 24-month aggregation,
@@ -3572,9 +3595,9 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
 
   // Per-customer monthly sales with inter-branch transfers EXCLUDED — the hub
   // pulls this for the Top Customers tile (summed over the selected timeline).
-  router.get('/api/reporting/inventory-customer-sales', reportingRateLimiter, requireReportingToken, (req, res) => {
+  router.get('/api/reporting/inventory-customer-sales', reportingRateLimiter, requireReportingToken, async (req, res) => {
     try {
-      ensureSalesRollupWarm();
+      await ensureSalesRollupWarm();
       const { limit, offset } = pagination(req, { defaultLimit: 5000, maxLimit: 20000 });
       // Served from the precomputed rollup cache (rebuilt once per inventory-sales
       // sync) — a cheap indexed SELECT, never an on-demand aggregation.
