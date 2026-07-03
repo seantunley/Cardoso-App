@@ -92,7 +92,7 @@ export default function SiteBackupRow({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="grid w-full grid-cols-[1.4fr_auto_1fr_1fr_1fr_auto] items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-muted/30"
+        className="grid w-full grid-cols-[1.4fr_auto_1fr_1fr_1fr_1fr_auto] items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-muted/30"
         aria-expanded={open}
       >
         <div className="flex items-center gap-2.5 min-w-0">
@@ -106,6 +106,7 @@ export default function SiteBackupRow({
         <div className="hidden sm:block"><LayerCell status={m.local.status} lastAt={m.local.lastAt} /></div>
         <div className="hidden sm:block"><LayerCell status={m.hub.status} lastAt={m.hub.lastAt} /></div>
         <div className="hidden sm:block"><LayerCell status={m.offsite.status} lastAt={m.offsite.lastAt} na={!kopiaEnabled} /></div>
+        <div className="hidden sm:block"><LayerCell status={m.sql.status} lastAt={m.sql.lastAt} na={m.sql.status === "unavailable" && m.sql.databases.length === 0} /></div>
         <span className="text-[11px] text-muted-foreground pr-1">{open ? "Hide" : "Details"}</span>
       </button>
 
@@ -158,27 +159,28 @@ export default function SiteBackupRow({
             </LayerDetail>
           )}
 
-          {/* SQL layer — only when the site reports SQL databases */}
-          {(m.sql.databases.length > 0 || m.sql.status !== "unavailable") && (
-            <LayerDetail
-              icon={ShieldCheck} iconCls="border-border bg-muted/40 text-foreground"
-              name="SQL Server (DAT)" status={m.sql.status} statusLabel={statusText(m.sql.status)}
-              lastAt={m.sql.lastAt}
-            >
-              {m.sql.databases.length > 0 && (
-                <div className="flex flex-wrap gap-1.5">
-                  {m.sql.databases.map((d) => {
-                    const t = toneFor(d.isSuccess === true ? "ok" : d.isSuccess === false ? "failed" : "unknown");
-                    return (
-                      <span key={d.name} className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-mono ${t.chip}`} title={d.backupAt ? fmtDate(d.backupAt) : ""}>
-                        {d.name}
-                      </span>
-                    );
-                  })}
-                </div>
-              )}
-            </LayerDetail>
-          )}
+          {/* SQL layer — always shown so SQL is first-class alongside the other
+              backup types; sites with no SQL Server say so plainly. */}
+          <LayerDetail
+            icon={ShieldCheck} iconCls="border-border bg-muted/40 text-foreground"
+            name="SQL Server (DAT)" status={m.sql.status} statusLabel={statusText(m.sql.status)}
+            lastAt={m.sql.lastAt}
+          >
+            {m.sql.databases.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5">
+                {m.sql.databases.map((d) => {
+                  const t = toneFor(d.isSuccess === true ? "ok" : d.isSuccess === false ? "failed" : "unknown");
+                  return (
+                    <span key={d.name} className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-mono ${t.chip}`} title={d.backupAt ? fmtDate(d.backupAt) : ""}>
+                      {d.name}
+                    </span>
+                  );
+                })}
+              </div>
+            ) : (
+              <span className="text-[11px] text-muted-foreground">{m.sql.message || "No SQL Server backup configured"}</span>
+            )}
+          </LayerDetail>
         </div>
       )}
     </div>

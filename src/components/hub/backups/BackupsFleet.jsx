@@ -70,7 +70,7 @@ export default function BackupsFleet({
               )}
             </div>
             <p className="mt-3 text-sm text-muted-foreground">
-              Local · Hub copy{kopiaEnabled ? " · Off-site" : ""} — one row per site, worst first.
+              Local · Hub copy{kopiaEnabled ? " · Off-site" : ""} · SQL — one row per site, worst first.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -140,12 +140,13 @@ export default function BackupsFleet({
         {/* Table */}
         <div className="overflow-hidden rounded-xl border border-border bg-card/60">
           {/* Column header */}
-          <div className="grid grid-cols-[1.4fr_auto_1fr_1fr_1fr_auto] items-center gap-3 border-b border-border bg-muted/30 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <div className="grid grid-cols-[1.4fr_auto_1fr_1fr_1fr_1fr_auto] items-center gap-3 border-b border-border bg-muted/30 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
             <span className="pl-6">Site</span>
             <span>Health</span>
             <span className="hidden sm:block">Local</span>
             <span className="hidden sm:block">Hub copy</span>
             <span className="hidden sm:block">Off-site</span>
+            <span className="hidden sm:block">SQL</span>
             <span />
           </div>
 
