@@ -11,6 +11,7 @@ import { useToast } from "@/components/ui/use-toast";
 import { reportClientError } from "@/lib/clientLog";
 import BackupsFleet from "@/components/hub/backups/BackupsFleet.jsx";
 import RestoreDialog from "@/components/hub/backups/RestoreDialog.jsx";
+import SnapshotsDialog from "@/components/hub/backups/SnapshotsDialog.jsx";
 import { normalizeSites } from "@/components/hub/backups/backupModel.js";
 import { buildDemoData } from "@/components/hub/backups/backupDemo.js";
 
@@ -31,6 +32,7 @@ export default function HubBackups() {
   const [pullingNow, setPullingNow] = useState(false);
   const [restoreSite, setRestoreSite] = useState(null);
   const [restoreSource, setRestoreSource] = useState("hub");
+  const [browseSite, setBrowseSite] = useState(null);
 
   const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ["hub-backup-status"], queryFn: () => getJson("/api/hub/backup-status"),
@@ -53,14 +55,12 @@ export default function HubBackups() {
   }, [demo, toast]);
 
   // Assemble the normalized model — from demo fixtures or the live queries.
-  const { models, kopiaEnabled, kopiaError, loading } = useMemo(() => {
+  const { models, kopiaEnabled, kopiaError, kopiaUiUrl, loading } = useMemo(() => {
     if (demo) {
       const d = buildDemoData();
-      const hubMap = d.hubBackupMap;
-      const kMap = d.kopiaMap;
       return {
-        models: normalizeSites({ backupStatus: d.backupStatus, hubBackupMap: hubMap, kopiaMap: kMap, kopiaEnabled: true }),
-        kopiaEnabled: true, kopiaError: null, loading: false,
+        models: normalizeSites({ backupStatus: d.backupStatus, hubBackupMap: d.hubBackupMap, kopiaMap: d.kopiaMap, kopiaEnabled: true }),
+        kopiaEnabled: true, kopiaError: null, kopiaUiUrl: d.ui_url, loading: false,
       };
     }
     const hubMap = Object.fromEntries((hubBackupData?.sites || []).map((s) => [s.site_id, s]));
@@ -69,12 +69,19 @@ export default function HubBackups() {
       models: normalizeSites({ backupStatus: data, hubBackupMap: hubMap, kopiaMap: kMap, kopiaEnabled: !!kopiaData?.enabled }),
       kopiaEnabled: !!kopiaData?.enabled,
       kopiaError: kopiaData?.enabled && kopiaData?.error ? kopiaData.error : null,
+      kopiaUiUrl: kopiaData?.ui_url || null,
       loading: isLoading,
     };
   }, [demo, data, hubBackupData, kopiaData, isLoading]);
 
   const openRestore = useCallback((site, source = "hub") => { setRestoreSource(source); setRestoreSite(site); }, []);
   const closeRestore = useCallback(() => setRestoreSite(null), []);
+
+  const openKopiaUi = useCallback((url) => {
+    if (!url) return;
+    if (demo) { toast({ title: "Demo mode", description: `Would open Kopia's web UI at ${url}` }); return; }
+    window.open(url, "_blank", "noopener,noreferrer");
+  }, [demo, toast]);
 
   const handleToggleSync = useCallback(async () => {
     if (demo) { setSyncEnabled((v) => !v); return; }
@@ -148,9 +155,15 @@ export default function HubBackups() {
         downloading={downloading}
         downloadingConfig={downloadingConfig}
         onRestore={openRestore}
+        kopiaUiUrl={kopiaUiUrl}
+        onOpenKopiaUi={openKopiaUi}
+        onBrowseOffsite={setBrowseSite}
       />
       {restoreSite && (
         <RestoreDialog site={restoreSite} source={restoreSource} demo={demo} onClose={closeRestore} />
+      )}
+      {browseSite && (
+        <SnapshotsDialog site={browseSite} demo={demo} kopiaUiUrl={kopiaUiUrl} onOpenKopiaUi={openKopiaUi} onClose={() => setBrowseSite(null)} />
       )}
     </>
   );

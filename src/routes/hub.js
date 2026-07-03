@@ -15,7 +15,7 @@ import { boolFromRow, expandDataRecord } from '../helpers.js';
 import { syncAllSites, syncSite, runHubBackupPull, pullBackupForSite, HUB_SITES } from '../services/hubEtl.js';
 import { runConnectionImport } from '../services/syncEngine.js';
 import { getHubStorageRuntime } from '../hub/storage/runtime.js';
-import { getKopiaStatus, isKopiaEnabled } from '../services/hub/kopiaStatus.js';
+import { getKopiaStatus, isKopiaEnabled, listHostSnapshots, normalizeKopiaHost } from '../services/hub/kopiaStatus.js';
 import { logError } from '../lib/errorLog.js';
 import { safeTokenEqual } from '../lib/safeEqual.js';
 import { logAudit } from '../lib/audit.js';
@@ -361,6 +361,26 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     } catch (err) {
       console.error('[hub-kopia-status] error:', err.message);
       res.json({ enabled: isKopiaEnabled(), ok: false, repo: null, sites: [], error: err.message, stale_hours: null });
+    }
+  });
+
+  // GET /api/hub/sites/:site_id/kopia-snapshots
+  // Read-only: every off-site (Kopia) snapshot for ONE site, newest first.
+  // Powers the in-app "View snapshots" viewer (and the restore dialog's
+  // Off-site tab). Scoped to the caller's allowed sites, same as kopia-status.
+  router.get('/api/hub/sites/:site_id/kopia-snapshots', requireAuth, requirePermission('can_access_hub_backups'), async (req, res) => {
+    try {
+      if (!isKopiaEnabled()) return res.json({ enabled: false, snapshots: [], error: null });
+      const site = db.prepare('SELECT id, slug, name FROM hub_sites WHERE id = ?').get(req.params.site_id);
+      if (!site) return res.status(404).json({ error: 'Site not found' });
+      const allowed = getAllowedSiteIds(req, res);
+      if (allowed !== null && !allowed.has(site.id)) return res.status(403).json({ error: 'Not permitted for this site' });
+      const host = normalizeKopiaHost(site);
+      const result = await listHostSnapshots({ host });
+      res.json({ ...result, host, site_id: site.id, site_name: site.name });
+    } catch (err) {
+      console.error('[hub-kopia-snapshots] error:', err.message);
+      res.json({ enabled: isKopiaEnabled(), snapshots: [], error: err.message });
     }
   });
 

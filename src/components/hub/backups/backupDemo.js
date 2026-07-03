@@ -110,7 +110,24 @@ export function buildDemoData() {
     total_bytes: s.kopia.bytes,
   }]));
 
-  return { backupStatus, hubBackupMap, kopiaMap, kopiaEnabled: true };
+  return { backupStatus, hubBackupMap, kopiaMap, kopiaEnabled: true, ui_url: "https://kopia.hub.local:51515" };
+}
+
+// Snapshot history for the in-app "View snapshots" viewer (?demo=1). Shaped
+// like listHostSnapshots() output so the viewer can't tell demo from real.
+export function buildDemoKopiaSnapshots(name = "site") {
+  const seed = String(name).length;
+  const rows = [{ h: 2, files: 1204 }, { h: 26, files: 1201 }, { h: 50, files: 1198 }, { h: 74, files: 1195 }, { h: 98, files: 1189 }];
+  return rows.map((r, i) => ({
+    id: `k${(seed * 7 + i).toString(16)}f3a9c2b1e${i}`,
+    rootID: `k${(seed + i).toString(16)}rootobj`,
+    endTime: ago(r.h),
+    startTime: ago(r.h + 0.05),
+    totalSize: 4_400_000 - i * 90_000,
+    fileCount: r.files,
+    dirCount: 42,
+    incomplete: false,
+  }));
 }
 
 // Snapshot list for the restore dialog (both hub-pull and off-site tabs).

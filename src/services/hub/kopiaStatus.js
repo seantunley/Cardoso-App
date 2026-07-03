@@ -169,8 +169,12 @@ async function runKopiaJson(args) {
  */
 export async function getKopiaStatus({ now = Date.now(), knownSites = [] } = {}) {
   const stale_hours = getKopiaStaleHours();
+  // Optional link to Kopia's own web UI (`kopia server start --ui`). Set
+  // KOPIA_UI_URL to the server address to surface an "Open Kopia UI" button on
+  // the Hub Backups page. Null when unset — the button stays hidden.
+  const ui_url = process.env.KOPIA_UI_URL || null;
   if (!isKopiaEnabled()) {
-    return { enabled: false, ok: false, repo: null, sites: [], error: null, stale_hours };
+    return { enabled: false, ok: false, repo: null, sites: [], error: null, stale_hours, ui_url };
   }
 
   let snapshots;
@@ -180,7 +184,7 @@ export async function getKopiaStatus({ now = Date.now(), knownSites = [] } = {})
     const msg = String(err?.stderr || err?.message || err).slice(0, 500);
     return {
       enabled: true, ok: false, repo: { ok: false, error: msg }, sites: [],
-      error: `kopia snapshot list failed: ${msg}`, stale_hours,
+      error: `kopia snapshot list failed: ${msg}`, stale_hours, ui_url,
     };
   }
 
@@ -196,5 +200,57 @@ export async function getKopiaStatus({ now = Date.now(), knownSites = [] } = {})
   const summary = summarizeKopiaSnapshots(snapshots, { now, staleHours: stale_hours });
   const sites = mergeWithKnownSites(knownSites, summary);
   const ok = sites.length > 0 && sites.every((s) => s.status === 'ok');
-  return { enabled: true, ok, repo, sites, error: null, stale_hours };
+  return { enabled: true, ok, repo, sites, error: null, stale_hours, ui_url };
+}
+
+/**
+ * Every snapshot for ONE site's Kopia host, newest first — powers the in-app
+ * "View snapshots" viewer on the Hub Backups page. Read-only: shells `kopia
+ * snapshot list --all --json` (off the main thread) and filters to the host,
+ * so it can't mutate the repo. Never throws — a kopia/repo failure comes back
+ * as a structured error.
+ *
+ * @param {{ host: string }} args  host = normalizeKopiaHost(site)
+ * @returns {Promise<{ enabled: boolean, snapshots: object[], error: string|null }>}
+ */
+export async function listHostSnapshots({ host } = {}) {
+  if (!isKopiaEnabled()) return { enabled: false, snapshots: [], error: null };
+  if (!host) return { enabled: true, snapshots: [], error: null };
+
+  let raw;
+  try {
+    raw = await runKopiaJson(['snapshot', 'list', '--all', '--json']);
+  } catch (err) {
+    const msg = String(err?.stderr || err?.message || err).slice(0, 500);
+    return { enabled: true, snapshots: [], error: `kopia snapshot list failed: ${msg}` };
+  }
+
+  const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
+  const snapshots = (Array.isArray(raw) ? raw : [])
+    .filter((s) => (s?.source?.host || '') === host)
+    .map((s) => {
+      const endTime = s?.endTime || s?.startTime || null;
+      const totalSize = num(s?.stats?.totalSize ?? s?.rootEntry?.summ?.size);
+      return {
+        id: s?.id || null,
+        rootID: s?.rootEntry?.obj || null,
+        startTime: s?.startTime || null,
+        endTime,
+        totalSize,
+        fileCount: num(s?.stats?.fileCount ?? s?.rootEntry?.summ?.files),
+        dirCount: num(s?.stats?.dirCount ?? s?.rootEntry?.summ?.dirs),
+        incomplete: !!s?.incomplete,
+        // Fields the source-agnostic RestoreDialog reads, so the Off-site tab
+        // of the restore flow can list these same snapshots.
+        filename: s?.id || endTime || 'snapshot',
+        mtime: endTime,
+        size_bytes: totalSize,
+        previews_filename: null,
+        previews_size_bytes: null,
+        integrity: null,
+      };
+    })
+    .sort((a, b) => new Date(b.endTime || 0).getTime() - new Date(a.endTime || 0).getTime());
+
+  return { enabled: true, snapshots, error: null };
 }

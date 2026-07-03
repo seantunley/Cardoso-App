@@ -4,7 +4,7 @@
 // without a hub. The container (pages/HubBackups.jsx) owns fetching + dialogs.
 
 import { useMemo, useState } from "react";
-import { RefreshCw, CloudDownload, Power, Search, CloudOff, ArrowUpDown, Database } from "lucide-react";
+import { RefreshCw, CloudDownload, Power, Search, CloudOff, ArrowUpDown, Database, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import SiteBackupRow from "./SiteBackupRow.jsx";
@@ -35,6 +35,7 @@ export default function BackupsFleet({
   syncEnabled, onToggleSync, togglingSync,
   onPullNow, pullingNow, onRefresh, refreshing,
   onPullDb, onPullConfig, downloading, downloadingConfig, onRestore,
+  kopiaUiUrl, onOpenKopiaUi, onBrowseOffsite,
 }) {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState({ key: "health", dir: "asc" });
@@ -89,6 +90,16 @@ export default function BackupsFleet({
             <Button variant="outline" size="sm" onClick={onRefresh} disabled={refreshing} className="h-10 border-border text-xs text-muted-foreground">
               <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />Refresh
             </Button>
+            {kopiaUiUrl && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="outline" size="sm" onClick={() => onOpenKopiaUi(kopiaUiUrl)} className="h-10 border-border text-xs text-muted-foreground">
+                    <ExternalLink className="mr-1.5 h-3.5 w-3.5" />Kopia UI
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Open Kopia's own web UI (browse the full tree, restore, retention) in a new tab</TooltipContent>
+              </Tooltip>
+            )}
           </div>
         </div>
 
@@ -174,6 +185,7 @@ export default function BackupsFleet({
                 downloading={downloading}
                 downloadingConfig={downloadingConfig}
                 onRestore={onRestore}
+                onBrowseOffsite={onBrowseOffsite}
               />
             ))
           )}

@@ -7,7 +7,7 @@
 import { useState } from "react";
 import {
   ChevronRight, Database, HardDrive, Cloud, CloudOff, ShieldCheck,
-  Download, Upload, CheckCircle2, AlertTriangle, XCircle, Clock,
+  Download, Upload, CheckCircle2, AlertTriangle, XCircle, Clock, Eye,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -80,7 +80,7 @@ function LayerDetail({ icon: Icon, iconCls, name, status, statusLabel, lastAt, s
 }
 
 export default function SiteBackupRow({
-  model, kopiaEnabled, onPullDb, onPullConfig, downloading, downloadingConfig, onRestore,
+  model, kopiaEnabled, onPullDb, onPullConfig, downloading, downloadingConfig, onRestore, onBrowseOffsite,
 }) {
   const [open, setOpen] = useState(false);
   const m = model;
@@ -153,6 +153,9 @@ export default function SiteBackupRow({
               lastAt={m.offsite.lastAt} size={m.offsite.bytes}
               extra={m.offsite.count ? `${m.offsite.count} snapshots` : null}
             >
+              <Button size="sm" variant="outline" onClick={() => onBrowseOffsite(m.raw)} className="h-7 px-3 text-xs">
+                <Eye className="mr-1.5 h-3 w-3" />View snapshots
+              </Button>
               <Button size="sm" variant="outline" disabled={!m.offsite.count} onClick={() => onRestore(m.raw, "offsite")}
                 className="h-7 px-3 text-xs text-status-critical hover:border-status-critical/60">
                 <Upload className="mr-1.5 h-3 w-3" />Restore off-site
