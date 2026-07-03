@@ -321,8 +321,14 @@
 /* Keyboard focus: a consistent visible ring on any interactive element that
    doesn't define its own focus-visible style. Mouse clicks don't trigger it
    (focus-visible only fires for keyboard / assistive-tech focus), so it's
-   unobtrusive for pointer users. */
-:where(a, button, [role="button"], [tabindex="0"], input, select, textarea):focus-visible {
+   unobtrusive for pointer users.
+
+   The command palette's input ([cmdk-input]) is exempt: it is ALWAYS focused
+   while the palette is open, so this unlayered rule (which outranks Tailwind's
+   layered outline-none) drew a permanent phosphor ring that spilled 2px past
+   the input's bottom border into the results list. The dialog itself is the
+   focus affordance there — a lone input in a modal needs no ring. */
+:where(a, button, [role="button"], [tabindex="0"], input:not([cmdk-input]), select, textarea):focus-visible {
   outline: 2px solid var(--phosphor);
   outline-offset: 2px;
   border-radius: 2px;

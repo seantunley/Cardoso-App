@@ -361,6 +361,7 @@ import {
   DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import CommandPalette from "@/components/CommandPalette";
+import { buildSettingsTabGroups } from "@/components/settings/settingsTabs";
 import NotificationsBell from "@/components/NotificationsBell";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { useAuth } from "@/lib/AuthContext";
@@ -488,6 +489,17 @@ export default function Layout({ children, currentPageName }) {
 
   const { user: currentUser, logout } = useAuth();
   const isAdmin = currentUser?.role === "admin";
+
+  // Single theme toggler — used by the collapsed sidebar, the expanded
+  // sidebar footer, the mobile header, AND the command palette. Was three
+  // identical inline copies before the palette became a fourth caller.
+  const toggleTheme = () => {
+    const next = theme === 'dark' ? 'light' : 'dark';
+    setTheme(next); applyTheme(next);
+    fetch('/api/auth/me', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ theme_preference: next }) })
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); })
+      .catch(err => { toast.error(`Couldn't save theme: ${err.message}`); reportClientError("Layout.themeSave", err); });
+  };
 
   useEffect(() => {
     if (!currentUser) return;
@@ -907,13 +919,7 @@ export default function Layout({ children, currentPageName }) {
                 <SidebarButton onClick={() => setSettingsOpen(true)} icon={Settings} label="Settings" collapsed />
               )}
               <SidebarButton
-                onClick={() => {
-                  const next = theme === 'dark' ? 'light' : 'dark';
-                  setTheme(next); applyTheme(next);
-                  fetch('/api/auth/me', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ theme_preference: next }) })
-                    .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); })
-                    .catch(err => { toast.error(`Couldn't save theme: ${err.message}`); reportClientError("Layout.themeSave", err); });
-                }}
+                onClick={toggleTheme}
                 icon={theme === 'dark' ? Sun : Moon}
                 label={theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
                 collapsed
@@ -990,13 +996,7 @@ export default function Layout({ children, currentPageName }) {
               <NotificationsBell />
               <button
                 type="button"
-                onClick={() => {
-                  const next = theme === 'dark' ? 'light' : 'dark';
-                  setTheme(next); applyTheme(next);
-                  fetch('/api/auth/me', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ theme_preference: next }) })
-                    .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); })
-                    .catch(err => { toast.error(`Couldn't save theme: ${err.message}`); reportClientError("Layout.themeSave", err); });
-                }}
+                onClick={toggleTheme}
                 title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
                 className="shrink-0 rounded-md p-2 text-[hsla(var(--sidebar-foreground),0.7)] transition-colors hover:bg-[hsl(var(--sidebar-accent))] hover:text-[hsl(var(--sidebar-foreground))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--phosphor)]"
               >
@@ -1028,7 +1028,7 @@ export default function Layout({ children, currentPageName }) {
           {canSeeSettings && (
             <Button variant="ghost" size="icon" onClick={() => setSettingsOpen(true)}><Settings className="h-5 w-5 text-amber-400" /></Button>
           )}
-          <Button variant="ghost" size="icon" onClick={() => { const next = theme === 'dark' ? 'light' : 'dark'; setTheme(next); applyTheme(next); fetch('/api/auth/me', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ theme_preference: next }) }).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); }).catch(err => { toast.error(`Couldn't save theme: ${err.message}`); reportClientError("Layout.themeSave", err); }); }} title={theme === 'dark' ? 'Light Mode' : 'Dark Mode'}>
+          <Button variant="ghost" size="icon" onClick={toggleTheme} title={theme === 'dark' ? 'Light Mode' : 'Dark Mode'}>
             {theme === 'dark' ? <Sun className="h-5 w-5 text-accent" /> : <Moon className="h-5 w-5 text-muted-foreground" />}
           </Button>
           <Button variant="ghost" size="icon" onClick={() => setChangePasswordOpen(true)} title="Change Password">
@@ -1088,12 +1088,40 @@ export default function Layout({ children, currentPageName }) {
         </Suspense>
       )}
 
-      {/* Cmd/Ctrl-K command palette — jump to any permitted page/report. */}
+      {/* Cmd/Ctrl-K command palette — jump to any permitted page/report,
+          run quick actions, or deep-link into a settings tab. Sections are
+          built here (not in the palette) so every entry reuses Layout's
+          existing gating + handlers: settings tabs come from the SAME
+          registry SettingsPanel renders (settingsTabs.js), so the palette
+          can never offer a tab the panel wouldn't show. */}
       <CommandPalette
         open={cmdOpen}
         onOpenChange={setCmdOpen}
         items={visibleNavItems}
         onSelect={(it) => navigate(`/${it.page}`)}
+        sections={[
+          {
+            heading: "Actions",
+            items: [
+              { id: "action:theme", name: theme === 'dark' ? "Switch to light mode" : "Switch to dark mode", icon: theme === 'dark' ? Sun : Moon, run: toggleTheme },
+              canSeeSettings && { id: "action:settings", name: "Open Settings", icon: Settings, run: () => setSettingsOpen(true) },
+              { id: "action:password", name: "Change password", icon: KeyRound, run: () => setChangePasswordOpen(true) },
+              { id: "action:logout", name: "Log out", icon: LogOut, run: () => logout(true) },
+            ].filter(Boolean),
+          },
+          canSeeSettings && {
+            heading: "Settings",
+            items: buildSettingsTabGroups({ currentUser, hubMode }).flatMap(g =>
+              g.tabs.map(t => ({
+                id: `settings:${t.id}`,
+                name: `Settings › ${t.label}`,
+                keywords: g.name,
+                icon: Settings,
+                run: () => { setSettingsInitialTab(t.id); setSettingsOpen(true); },
+              }))
+            ),
+          },
+        ].filter(Boolean)}
       />
 
       {showBuildDiagnostics && (
