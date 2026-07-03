@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/apiClient";
 import AuditLogTable from "../components/audit/AuditLogTable";
+import DataTable from "@/components/shared/DataTable";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Shield, LogIn, ClipboardList } from "lucide-react";
@@ -38,6 +39,21 @@ function formatDateTime(raw) {
   if (isNaN(d.getTime())) return raw;
   return LOGIN_DT_FMT.format(d);
 }
+
+// Login-log columns for the shared DataTable. Timestamps sort on the raw
+// ISO value (lexically correct), not the display string; CSV exports the
+// raw value for the same reason.
+const LOGIN_COLUMNS = [
+  { key: "user_email", label: "Username" },
+  { key: "user_name", label: "Full Name", format: (v) => v || "—" },
+  { key: "ip_address", label: "IP Address", mono: true, format: (v) => v || "—" },
+  {
+    key: "logged_in_at", label: "Logged In At",
+    format: (v) => formatDateTime(v),
+    sortValue: (row) => row.logged_in_at || "",
+    csv: (v) => v || "",
+  },
+];
 
 export default function AuditLog() {
   const [currentUser, setCurrentUser] = useState(null);
@@ -162,36 +178,21 @@ export default function AuditLog() {
                 </CardContent>
               </Card>
             ) : (
-              <div className="overflow-x-auto rounded-lg border border-border">
-                <table className="min-w-full text-sm">
-                  <thead className="bg-muted">
-                    <tr>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                        Username
-                      </th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                        Full Name
-                      </th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                        IP Address
-                      </th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                        Logged In At
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border bg-card">
-                    {loginLogs.map((entry) => (
-                      <tr key={entry.id} className="transition-colors hover:bg-muted/50">
-                        <td className="px-4 py-3 font-medium text-foreground">{entry.user_email}</td>
-                        <td className="px-4 py-3 text-muted-foreground">{entry.user_name || "—"}</td>
-                        <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{entry.ip_address || "—"}</td>
-                        <td className="px-4 py-3 text-muted-foreground">{formatDateTime(entry.logged_in_at)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              // Shared DataTable in uncontrolled mode: it owns sorting
+              // (persisted), the filter box, column show/hide, and CSV export.
+              <DataTable
+                columns={LOGIN_COLUMNS}
+                rows={loginLogs}
+                rowKey={(r) => r.id}
+                storageKey="cardoso.table.login-log"
+                exportName="login-log"
+                toolbar
+                filterPlaceholder="Filter by user, name, or IP…"
+                defaultSortKey="logged_in_at"
+                defaultSortDir="desc"
+                defaultWidths={{ user_email: 220, user_name: 200, ip_address: 160, logged_in_at: 200 }}
+                maxHeight="65vh"
+              />
             )}
           </TabsContent>
         </Tabs>
