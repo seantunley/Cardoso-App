@@ -41,19 +41,21 @@ function LayerCell({ status, lastAt, na }) {
 }
 
 // Secondary indicator inside the off-site cell: did the SQL Server .bak files
-// ride into the newest snapshot, and are they fresh? Only shown when the site
-// actually sends SQL off-site ('ok' | 'stale'); hidden for sites that don't.
+// ride into the newest snapshot, and are they fresh? Shown for 'ok' (green),
+// 'stale' (red) and 'error' (amber — couldn't read the tree); hidden for 'never'
+// (the site simply doesn't send SQL off-site).
 function SqlOffsiteDot({ sql }) {
   if (!sql?.status || sql.status === "never") return null;
-  const tone = toneFor(sql.status === "ok" ? "ok" : "stale");
+  const tone = toneFor(sql.status === "ok" ? "ok" : sql.status === "error" ? "warning" : "stale");
   const dbs = sql.databases?.length ? ` — ${sql.databases.map((d) => d.name).join(", ")}` : "";
   const age = sql.newestAt ? ` (newest ${fmtRelative(sql.newestAt)})` : "";
+  const label = sql.status === "ok" ? "current" : sql.status === "error" ? `check failed${sql.error ? ` — ${sql.error}` : ""}` : "STALE";
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <Database className={`h-3 w-3 shrink-0 cursor-default ${tone.text}`} />
       </TooltipTrigger>
-      <TooltipContent>SQL off-site: {sql.status === "ok" ? "current" : "STALE"}{dbs}{age}</TooltipContent>
+      <TooltipContent>SQL off-site: {label}{sql.status !== "error" ? `${dbs}${age}` : ""}</TooltipContent>
     </Tooltip>
   );
 }

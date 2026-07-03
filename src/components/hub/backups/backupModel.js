@@ -117,12 +117,14 @@ export function normalizeSites({ backupStatus, hubBackupMap = {}, kopiaMap = {},
     // Kopia snapshot and are fresh. Distinct from the SQL-DAT layer (which polls
     // the site) — this reads what actually reached the hub. 'never' can mean the
     // site simply doesn't send SQL off-site, so the UI treats it as N/A rather
-    // than a failure; only 'stale' is a real problem.
+    // than a failure; 'stale' is a real problem and 'error' means the tree
+    // couldn't be read (surfaced, not swallowed).
     const sqlOffsite = {
-      status: sqlOff?.status || null, // 'ok' | 'stale' | 'never' | null(unknown)
+      status: sqlOff?.status || null, // 'ok' | 'stale' | 'never' | 'error' | null(unknown)
       newestAt: sqlOff?.newest_at || null,
       ageHours: sqlOff?.age_hours ?? null,
       databases: sqlOff?.databases || [],
+      error: sqlOff?.error || null,
       applicable: !!sqlOff && sqlOff.status !== "never",
     };
 

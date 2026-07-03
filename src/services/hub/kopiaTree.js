@@ -46,24 +46,33 @@ function kopiaArgs(args) {
  *   drwxr-xr-x            0 2024-06-15 14:30:00 SAST  subdir/
  *
  * i.e. mode, size, "YYYY-MM-DD HH:MM:SS", a timezone token, then the name (which
- * may itself contain spaces and, under -r, slashes). PURE — no I/O.
+ * may itself contain spaces and, under -r, slashes). SOME kopia builds insert an
+ * object-id column between the tz and the name:
+ *   -rw-r--r--  1234 2024-06-15 14:30:00 SAST k2f3a…e9 path/to/file.bak
+ * so we strip a leading object-id-shaped token off the name — otherwise the
+ * browser would try to descend into "k2f3a…e9 database" and fail. The id is
+ * captured (objectID) but navigation still goes by clean path from the root,
+ * which is what keeps browsing scoped to the validated snapshot. PURE — no I/O.
  *
  * @param {string} stdout
  * @returns {Array<{ name: string, isDir: boolean, size: number|null,
- *   mtimeRaw: string|null, mtime: string|null }>} one entry per parsed line;
- *   unparseable lines are skipped (they don't crash the listing).
+ *   mtimeRaw: string|null, mtime: string|null, objectID: string|null }>} one
+ *   entry per parsed line; unparseable lines are skipped (they don't crash it).
  */
 export function parseKopiaLsLong(stdout) {
   const out = [];
-  // mode | size | date time | tz token | name(rest)
-  const re = /^([dlbcps-][rwxsStT-]{9})\s+(\d+)\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+(\S+)\s+(.+?)\s*$/;
+  // mode | size | date time | tz | [object-id] | name(rest). The object-id group
+  // is optional and only matches a kopia-id-shaped token (hex, optional 1-letter
+  // prefix, ≥15 chars) that is FOLLOWED by a further name token — so a lone
+  // hex-named file stays the name and a real name is never eaten.
+  const re = /^([dlbcps-][rwxsStT-]{9})\s+(\d+)\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+(\S+)\s+(?:([a-zA-Z]?[0-9a-f]{15,})\s+)?(.+?)\s*$/;
   for (const rawLine of String(stdout || '').split(/\r?\n/)) {
     const line = rawLine.replace(/\s+$/, '');
     if (!line) continue;
     const m = re.exec(line);
     if (!m) continue;
-    const [, mode, sizeStr, dateTime] = m;
-    let name = m[5];
+    const [, mode, sizeStr, dateTime, tz, objectID] = m;
+    let name = m[6];
     const isDir = mode[0] === 'd' || name.endsWith('/');
     if (name.endsWith('/')) name = name.slice(0, -1);
     // Interpret the timestamp as local time (fleet is single-timezone). Dropping
@@ -74,8 +83,9 @@ export function parseKopiaLsLong(stdout) {
       name,
       isDir,
       size: isDir ? null : Number(sizeStr),
-      mtimeRaw: `${dateTime} ${m[4]}`,
+      mtimeRaw: `${dateTime} ${tz}`,
       mtime: Number.isFinite(t) ? new Date(t).toISOString() : null,
+      objectID: objectID || null,
     });
   }
   return out;
@@ -241,27 +251,36 @@ export async function listSnapshotDir({ rootID, subPath = '' } = {}) {
  * fresh, read from a specific snapshot. Recursively lists the sql-backups folder
  * inside the snapshot and summarizes. Read-only; never throws.
  *
- * A snapshot that simply has no sql-backups folder (site doesn't run SQL, or
- * hasn't been set up yet) comes back status:'never' with a benign reason — the
- * alert rule treats that as "not configured", not a failure, so SQL-less sites
- * are never nagged.
+ * Three outcomes, kept distinct on purpose:
+ *   • the sql-backups folder simply isn't in the snapshot (site doesn't run SQL,
+ *     or isn't set up yet) → status:'never' — benign, the alert treats it as
+ *     "not configured" so SQL-less sites are never nagged;
+ *   • the folder is there and readable → 'ok'/'stale' from summarizeSqlOffsite;
+ *   • the tree exists but couldn't be READ (a corrupt/missing object, a repo
+ *     error) → status:'error' with the message, so it's surfaced (UI shows it),
+ *     NOT silently folded into 'never'.
+ *
+ * Only the FIRST case ("folder absent") is treated as benign; every other kopia
+ * failure is an 'error'. Erring this way means a genuine read failure shows up
+ * rather than masquerading as an unconfigured site.
  *
  * @param {{ rootID: string, now?: number, staleHours?: number }} args
  * @returns {Promise<object>} summarizeSqlOffsite shape + { error }
  */
 export async function collectSqlOffsite({ rootID, now = Date.now(), staleHours = 26 } = {}) {
-  const empty = { status: 'never', reason: 'no_sql_backups', newest_at: null, age_hours: null, file_count: 0, databases: [], error: null };
-  if (!rootID) return { ...empty, reason: 'no_snapshot' };
+  const empty = { newest_at: null, age_hours: null, file_count: 0, databases: [] };
+  if (!rootID) return { ...empty, status: 'never', reason: 'no_snapshot', error: null };
   try {
     const stdout = await runKopiaLs(`${rootID}/${SQL_BACKUP_SUBPATH}`, { recursive: true });
     return { ...summarizeSqlOffsite(parseKopiaLsLong(stdout), { now, staleHours }), error: null };
   } catch (err) {
     const msg = String(err?.stderr || err?.message || err);
-    // The folder not existing is expected for a site without SQL backups — not
-    // an error, just "none".
-    if (/not found|does not exist|no such|unable to (get|open)/i.test(msg)) {
-      return { ...empty, reason: 'no_sql_folder' };
+    // ONLY "the path/entry isn't in the snapshot" is benign. A corrupt-object or
+    // content-not-found error (e.g. "unable to open object … content not found")
+    // is a real read failure and must NOT be classified as an absent folder.
+    if (/entry not found|no such file or directory|does not exist|not found in (the )?snapshot/i.test(msg)) {
+      return { ...empty, status: 'never', reason: 'no_sql_folder', error: null };
     }
-    return { ...empty, error: `kopia ls failed: ${msg.slice(0, 400)}` };
+    return { ...empty, status: 'error', reason: 'read_error', error: `kopia ls failed: ${msg.slice(0, 400)}` };
   }
 }

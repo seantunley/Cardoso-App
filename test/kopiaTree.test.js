@@ -33,6 +33,19 @@ describe('parseKopiaLsLong', () => {
     expect(rows[0].name).toBe('My Documents/a file.bak');
   });
 
+  it('strips a leading object-id column when kopia emits one', () => {
+    const rows = parseKopiaLsLong('drwxr-xr-x  0 2024-06-15 14:30:00 SAST k2f3a9c2b1e0d4f6a8b1c3d5e7f9a0b12 database');
+    expect(rows[0].name).toBe('database');
+    expect(rows[0].isDir).toBe(true);
+    expect(rows[0].objectID).toBe('k2f3a9c2b1e0d4f6a8b1c3d5e7f9a0b12');
+  });
+
+  it('does not eat a lone hex-named file as an object id', () => {
+    const rows = parseKopiaLsLong('-rw-r--r--  10 2024-06-15 14:30:00 UTC a1b2c3d4e5f6a1b2c3d4.bak');
+    expect(rows[0].name).toBe('a1b2c3d4e5f6a1b2c3d4.bak');
+    expect(rows[0].objectID).toBeNull();
+  });
+
   it('detects a directory by mode even without a trailing slash', () => {
     const rows = parseKopiaLsLong('drwxr-xr-x 0 2024-06-15 14:30:00 UTC subdir');
     expect(rows[0].isDir).toBe(true);

@@ -36,11 +36,12 @@ function SqlOffsitePanel({ verdict }) {
       </div>
     );
   }
-  const tone = toneFor(verdict.status === "ok" ? "ok" : verdict.status === "stale" ? "stale" : "unknown");
+  const tone = toneFor(verdict.status === "ok" ? "ok" : verdict.status === "stale" ? "stale" : verdict.status === "error" ? "warning" : "unknown");
   const heading =
     verdict.status === "ok" ? "SQL backups are reaching the hub"
       : verdict.status === "stale" ? "SQL backups off-site are STALE"
-        : "No SQL backups in the off-site snapshot";
+        : verdict.status === "error" ? "Couldn't read SQL backups off-site"
+          : "No SQL backups in the off-site snapshot";
   return (
     <div className={`rounded-lg border px-3 py-2.5 ${tone.chip}`}>
       <div className="flex items-center gap-2 text-xs font-semibold">
@@ -66,7 +67,7 @@ function SqlOffsitePanel({ verdict }) {
           })}
         </div>
       ) : (
-        verdict.status !== "stale" && (
+        verdict.status !== "stale" && verdict.status !== "error" && (
           <div className="mt-1 text-[11px] opacity-80">
             This site isn't sending SQL Server backups off-site (or SQL isn't configured here).
           </div>
