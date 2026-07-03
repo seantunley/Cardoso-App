@@ -13,6 +13,362 @@ import { jsPDF } from 'jspdf';
 
 // ---- Content (curated), keyed by ISO date ---------------------------------
 const RELEASES = {
+  '2026-06-17': {
+    product: 'Cardoso App',
+    title: 'Product Update',
+    date: '17 June 2026',
+    slug: '17-June-2026',
+    intro:
+      "This update (v2026.5.9.8) adds a new Sales by Vendor report and a " +
+      "breakdown of BAT exceptions by reason. Report printing has also been " +
+      "tightened: the page footer no longer bleeds into table content, and " +
+      "week blocks in the BAT Exceptions report stay together across page breaks.",
+    sections: [
+      {
+        label: 'NEW',
+        heading: 'New Features',
+        items: [
+          {
+            title: 'Sales by Vendor report',
+            body:
+              "A new report shows all item sales per vendor for any date range " +
+              "you choose. Filter by vendor, toggle a year-over-year comparison " +
+              "to see how each vendor's sales track against the same period last " +
+              "year, and switch to a month-by-month matrix for a detailed " +
+              "breakdown. Vendor names are sourced directly from the Sage vendor " +
+              "master so they are always accurate.",
+          },
+          {
+            title: 'BAT Exceptions by Week — totals by exception reason',
+            body:
+              "The BAT Exceptions by Week report now shows the total value of " +
+              "exceptions broken down by reason, so you can see at a glance " +
+              "which exception types are driving the most variance each week.",
+          },
+        ],
+      },
+      {
+        label: 'FIXED',
+        heading: 'Fixes',
+        items: [
+          {
+            title: 'Report footers no longer overlap table content when printing',
+            body:
+              "The footer on printed reports now flows naturally at the bottom " +
+              "of the page and no longer bleeds into the last rows of a table.",
+          },
+          {
+            title: 'BAT Exceptions week blocks stay together across page breaks',
+            body:
+              "When printing the BAT Exceptions report, each week's block is " +
+              "now kept whole — entries for a week are no longer split across " +
+              "two pages.",
+          },
+        ],
+      },
+    ],
+  },
+  '2026-06-18': {
+    product: 'Cardoso App',
+    title: 'Product Update',
+    date: '18 June 2026',
+    slug: '18-June-2026',
+    intro:
+      "This update centres on the Sales by Vendor report. The former CSV export " +
+      "has been replaced with a full Excel workbook: a year-over-year Dashboard " +
+      "tab highlighting the top movers, per-month quantities, prior-year comparison " +
+      "figures, and all amounts in Rand — ready to pivot and chart without any " +
+      "manual setup. Head-office users receive the same data broken out by branch. " +
+      "Accompanying accuracy improvements sharpen the year-over-year rankings, and " +
+      "under-the-hood fixes make inventory syncing more resilient and self-healing.",
+    sections: [
+      {
+        label: 'NEW',
+        heading: 'New Features',
+        items: [
+          {
+            title: 'Excel export with year-over-year dashboard for Sales by Vendor',
+            body:
+              "The Sales by Vendor export is now a formatted Excel workbook instead " +
+              "of a plain CSV. It includes a Dashboard tab with the Top-10 year-over-" +
+              "year movers by value, a long-format Data sheet with Year and Month as " +
+              "separate columns ready for pivot charting, prior-year quantities " +
+              "alongside current figures, and all amounts in Rand.",
+          },
+          {
+            title: 'Per-branch breakdown at head office',
+            body:
+              "When viewed from the hub, the Sales by Vendor Excel export splits the " +
+              "data by branch, giving head-office users a complete per-depot picture " +
+              "in a single workbook.",
+          },
+        ],
+      },
+      {
+        label: 'IMPROVED',
+        heading: 'Improvements',
+        items: [
+          {
+            title: 'Year-over-year figures shown per month',
+            body:
+              "On the Sales by Vendor report, year-over-year comparisons are now " +
+              "broken down by month, making seasonal patterns and monthly swings " +
+              "easier to read.",
+          },
+          {
+            title: 'Same-day recovery for failed nightly syncs',
+            body:
+              "The scheduled data sync now runs an hourly catch-up during the day, " +
+              "so a branch whose nightly sync failed no longer has to wait until the " +
+              "following night to get current figures.",
+          },
+        ],
+      },
+      {
+        label: 'FIXED',
+        heading: 'Fixes',
+        items: [
+          {
+            title: 'Top-10 year-over-year movers show only true comparisons',
+            body:
+              "Items that had no sales in the prior year are no longer included in " +
+              "the Top-10 movers list. The ranking now compares only items with sales " +
+              "in both years, giving a meaningful year-over-year view.",
+          },
+          {
+            title: 'Money amounts stay on one line in the by-month matrix',
+            body:
+              "Large Rand amounts in the Sales by Vendor by-month view no longer " +
+              "wrap onto a second line.",
+          },
+          {
+            title: 'Inventory sync is more robust',
+            body:
+              "The inventory sync now stages data before committing it, so a sync " +
+              "that fails partway through cannot publish a half-built result. " +
+              "Concurrent syncs no longer produce duplicate rows, and the sync no " +
+              "longer stalls other parts of the application while running.",
+          },
+        ],
+      },
+    ],
+  },
+  '2026-06-22': {
+    product: 'Cardoso App',
+    title: 'Product Update',
+    date: '22 June 2026',
+    slug: '22-June-2026',
+    intro:
+      "This update centres on the proof-of-delivery (POD) viewer in BAT " +
+      "reconciliation. You can now page through every page of a multi-page " +
+      "POD document directly in the app, rotate pages to any orientation, " +
+      "and see previews for historical deliveries — right back to your " +
+      "earliest records. Sideways pages are straightened automatically, " +
+      "existing previews are preserved if a new render fails, and the " +
+      "viewer no longer clips tall documents. The app also stays responsive " +
+      "while previews are being generated in the background.",
+    sections: [
+      {
+        label: 'NEW',
+        heading: 'New Features',
+        items: [
+          {
+            title: 'Multi-page POD document viewer',
+            body:
+              "Proof-of-delivery documents with more than one page can now " +
+              "be paged through directly in the app — no need to download " +
+              "the file. Use the forward and back controls to step through " +
+              "each page of a delivery document.",
+          },
+          {
+            title: 'Rotate documents in the POD viewer',
+            body:
+              "Left and right 90° rotation buttons let you correct the " +
+              "orientation of a sideways or inverted document without " +
+              "leaving the reconciliation screen.",
+          },
+          {
+            title: 'Historical POD previews',
+            body:
+              "Deliveries processed before the preview feature was " +
+              "introduced now show their POD previews too. The Operations " +
+              "OCR panel displays backfill progress week by week, so you " +
+              "can track how much of your history has been filled in.",
+          },
+        ],
+      },
+      {
+        label: 'IMPROVED',
+        heading: 'Improvements',
+        items: [
+          {
+            title: 'Sideways pages auto-straightened',
+            body:
+              "When a POD document contains pages that were scanned or " +
+              "photographed sideways, those pages are now automatically " +
+              "rotated upright for comfortable reading.",
+          },
+          {
+            title: 'Existing preview preserved on render failure',
+            body:
+              "If a new render attempt encounters a problem, the previously " +
+              "confirmed preview is kept in place rather than being replaced " +
+              "with an error, so a working view is never lost.",
+          },
+        ],
+      },
+      {
+        label: 'FIXED',
+        heading: 'Fixes',
+        items: [
+          {
+            title: 'POD preview no longer shrinks',
+            body:
+              "A stray height limit in the viewer was compressing tall " +
+              "documents. It has been removed — previews now display at " +
+              "their full size.",
+          },
+          {
+            title: 'App stays responsive while previews generate',
+            body:
+              "Background preview generation previously competed with the " +
+              "interface for processing time, causing occasional " +
+              "sluggishness. The work is now properly offloaded so the app " +
+              "stays fast while previews are being built.",
+          },
+        ],
+      },
+    ],
+  },
+  '2026-06-23': {
+    product: 'Cardoso App',
+    title: 'Product Update',
+    date: '23 June 2026',
+    slug: '23-June-2026',
+    intro:
+      "This update (v2026.5.10) adds a write-off candidate picker that exports a " +
+      "formatted PDF of items flagged for write-off, and resolves a performance " +
+      "issue in BAT reconciliation where preview rendering could slow the interface " +
+      "and re-OCR'd rows were not always shown correctly.",
+    sections: [
+      {
+        label: 'NEW',
+        heading: 'New Features',
+        items: [
+          {
+            title: 'Write-off candidate picker with PDF export',
+            body:
+              "A new tool identifies inventory items flagged as write-off candidates " +
+              "and exports the list as a formatted PDF, ready to review with management " +
+              "or file for audit purposes.",
+          },
+        ],
+      },
+      {
+        label: 'FIXED',
+        heading: 'Fixes',
+        items: [
+          {
+            title: 'BAT reconciliation preview no longer slows the interface',
+            body:
+              "Loading a BAT reconciliation preview could make the interface sluggish " +
+              "or briefly unresponsive. Preview rendering now yields correctly so the " +
+              "interface stays smooth. Rows that have been re-processed by OCR are also " +
+              "displayed accurately after the update.",
+          },
+        ],
+      },
+    ],
+  },
+  '2026-06-30': {
+    product: 'Cardoso App',
+    title: 'Product Update',
+    date: '30 June 2026',
+    slug: '30-June-2026',
+    intro:
+      "This update advances the off-site backup capabilities of the Cardoso App. " +
+      "Head-office users can now see the status of each site's off-site Kopia " +
+      "backup directly on the Hub Backups page, with proactive alerts when a " +
+      "backup is stale or has encountered an error. The Kopia backup agent is now " +
+      "bundled in the Windows installer so it deploys automatically alongside the " +
+      "app. Backup health tracking has been rebuilt to be more accurate and " +
+      "resilient — it no longer depends on the scheduler staying alive, failed " +
+      "backups retry automatically, and the off-site agent guards against " +
+      "uploading outdated data. A fix also eliminates a BAT reconciliation " +
+      "annoyance where historical OCR error notifications re-appeared each time " +
+      "the page was opened.",
+    sections: [
+      {
+        label: 'NEW',
+        heading: 'New Features',
+        items: [
+          {
+            title: 'Off-site backup status on the Hub Backups page',
+            body:
+              "The Hub Backups page now shows the current state of each site's " +
+              "off-site Kopia backup alongside the local backup status. When a " +
+              "backup is stale or the repository reports an error, a proactive " +
+              "alert is raised so nothing slips through unnoticed.",
+            details: [
+              "Per-site off-site backup status (last snapshot time, freshness verdict, any repository error) shown directly on the Hub Backups dashboard.",
+              "A new alert rule fires when a site's off-site backup is overdue — surfaced in the existing Insights / Alerts feed.",
+              "Status is scoped to the sites each head-office user is permitted to see.",
+            ],
+          },
+          {
+            title: 'Kopia backup agent bundled in the Windows installer',
+            body:
+              "The Kopia off-site backup agent is now included in the Windows " +
+              "installer package. New and updated installations receive the " +
+              "backup agent automatically — no separate download or manual " +
+              "setup step required.",
+          },
+        ],
+      },
+      {
+        label: 'IMPROVED',
+        heading: 'Improvements',
+        items: [
+          {
+            title: 'More reliable and accurate backup health reporting',
+            body:
+              "Backup health is now assessed from the actual state of the backup " +
+              "files rather than relying on the Windows Task Scheduler to report " +
+              "success. This means the health indicator stays correct even when " +
+              "the scheduler is stopped or has not yet run.",
+            details: [
+              "A failed local backup now retries automatically on a back-off schedule, catching up on any missed windows.",
+              "A data-age guard stops the off-site snapshot agent from uploading a stale copy — if the local source hasn't been updated recently, the snapshot is deferred until fresh data is available.",
+              "The hub's backup health verdict now reflects the actual backup outcome rather than defaulting to the data age alone.",
+            ],
+          },
+        ],
+      },
+      {
+        label: 'FIXED',
+        heading: 'Fixes',
+        items: [
+          {
+            title: 'BAT reconciliation — old OCR errors no longer re-notify on every open',
+            body:
+              "Historical per-row OCR errors from previous reconciliation runs " +
+              "were re-appearing as notification toasts each time the BAT " +
+              "Reconciliation page was opened. They are now seeded quietly on " +
+              "load and only surface as live notifications when OCR is actively " +
+              "running in the current session.",
+          },
+          {
+            title: 'Hub Backups page surfaces Kopia repository errors',
+            body:
+              "When the off-site backup agent encounters a repository problem — " +
+              "such as a connectivity failure or a corrupt snapshot — the error " +
+              "is now shown on the Hub Backups page rather than the site " +
+              "appearing healthy.",
+          },
+        ],
+      },
+    ],
+  },
   '2026-06-15': {
     product: 'Cardoso App',
     title: 'Product Update',
