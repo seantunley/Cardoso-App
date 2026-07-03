@@ -40,6 +40,24 @@ function LayerCell({ status, lastAt, na }) {
   );
 }
 
+// Secondary indicator inside the off-site cell: did the SQL Server .bak files
+// ride into the newest snapshot, and are they fresh? Only shown when the site
+// actually sends SQL off-site ('ok' | 'stale'); hidden for sites that don't.
+function SqlOffsiteDot({ sql }) {
+  if (!sql?.status || sql.status === "never") return null;
+  const tone = toneFor(sql.status === "ok" ? "ok" : "stale");
+  const dbs = sql.databases?.length ? ` — ${sql.databases.map((d) => d.name).join(", ")}` : "";
+  const age = sql.newestAt ? ` (newest ${fmtRelative(sql.newestAt)})` : "";
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Database className={`h-3 w-3 shrink-0 cursor-default ${tone.text}`} />
+      </TooltipTrigger>
+      <TooltipContent>SQL off-site: {sql.status === "ok" ? "current" : "STALE"}{dbs}{age}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function HealthPill({ tone }) {
   const t = toneFor(tone === "ok" ? "ok" : tone === "warn" ? "warning" : tone === "critical" ? "error" : "unknown");
   const Icon = TONE_ICON[tone] || Clock;
@@ -106,7 +124,10 @@ export default function SiteBackupRow({
         <HealthPill tone={m.overallTone} />
         <div className="hidden sm:block"><LayerCell status={m.local.status} lastAt={m.local.lastAt} /></div>
         <div className="hidden sm:block"><LayerCell status={m.hub.status} lastAt={m.hub.lastAt} /></div>
-        <div className="hidden sm:block"><LayerCell status={m.offsite.status} lastAt={m.offsite.lastAt} na={!kopiaEnabled} /></div>
+        <div className="hidden sm:flex items-center gap-1.5">
+          <LayerCell status={m.offsite.status} lastAt={m.offsite.lastAt} na={!kopiaEnabled} />
+          {kopiaEnabled && <SqlOffsiteDot sql={m.offsite.sql} />}
+        </div>
         <div className="hidden sm:block"><LayerCell status={m.sql.status} lastAt={m.sql.lastAt} na={m.sql.status === "unavailable" && m.sql.databases.length === 0} /></div>
         <span className="text-[11px] text-muted-foreground pr-1">{open ? "Hide" : "Details"}</span>
       </button>
@@ -152,6 +173,11 @@ export default function SiteBackupRow({
               name="Off-site (Kopia)" status={m.offsite.status} statusLabel={offsiteText(m.offsite)}
               lastAt={m.offsite.lastAt} size={m.offsite.bytes}
               extra={m.offsite.count ? `${m.offsite.count} snapshots` : null}
+              sub={
+                m.offsite.sql?.status && m.offsite.sql.status !== "never"
+                  ? `SQL backups off-site: ${m.offsite.sql.status === "ok" ? "current" : "STALE"}${m.offsite.sql.databases?.length ? ` · ${m.offsite.sql.databases.map((d) => d.name).join(", ")}` : ""} — View snapshots for detail`
+                  : undefined
+              }
             >
               <Button size="sm" variant="outline" onClick={() => onBrowseOffsite(m.raw)} className="h-7 px-3 text-xs">
                 <Eye className="mr-1.5 h-3 w-3" />View snapshots

@@ -46,6 +46,12 @@ export default function HubBackups() {
     queryKey: ["hub-kopia-status"], queryFn: () => getJson("/api/hub/kopia-status"),
     refetchInterval: 60_000, enabled: !demo,
   });
+  // SQL-in-off-site verdict per site. Polled slowly (SQL backups are nightly and
+  // each poll shells `kopia ls` per site) and only when Kopia is on.
+  const { data: sqlOffsiteData } = useQuery({
+    queryKey: ["hub-kopia-sql-status"], queryFn: () => getJson("/api/hub/kopia-sql-status"),
+    refetchInterval: 300_000, enabled: !demo && !!kopiaData?.enabled,
+  });
 
   useEffect(() => {
     if (demo) return;
@@ -59,23 +65,24 @@ export default function HubBackups() {
     if (demo) {
       const d = buildDemoData();
       return {
-        models: normalizeSites({ backupStatus: d.backupStatus, hubBackupMap: d.hubBackupMap, kopiaMap: d.kopiaMap, kopiaEnabled: true, hubKnown: true }),
+        models: normalizeSites({ backupStatus: d.backupStatus, hubBackupMap: d.hubBackupMap, kopiaMap: d.kopiaMap, sqlOffsiteMap: d.sqlOffsiteMap, kopiaEnabled: true, hubKnown: true }),
         kopiaEnabled: true, kopiaError: null, kopiaUiUrl: d.ui_url, loading: false,
       };
     }
     const hubMap = Object.fromEntries((hubBackupData?.sites || []).map((s) => [s.site_id, s]));
     const kMap = Object.fromEntries((kopiaData?.sites || []).filter((s) => s.site_id).map((s) => [s.site_id, s]));
+    const sqlMap = Object.fromEntries((sqlOffsiteData?.sites || []).filter((s) => s.site_id).map((s) => [s.site_id, s]));
     return {
       // hubKnown: the hub-copy query has actually resolved. Until it does (or
       // if it errors and never yields data), don't let missing hub entries
       // score as 'never' and paint healthy sites as Problems.
-      models: normalizeSites({ backupStatus: data, hubBackupMap: hubMap, kopiaMap: kMap, kopiaEnabled: !!kopiaData?.enabled, hubKnown: hubBackupData !== undefined }),
+      models: normalizeSites({ backupStatus: data, hubBackupMap: hubMap, kopiaMap: kMap, sqlOffsiteMap: sqlMap, kopiaEnabled: !!kopiaData?.enabled, hubKnown: hubBackupData !== undefined }),
       kopiaEnabled: !!kopiaData?.enabled,
       kopiaError: kopiaData?.enabled && kopiaData?.error ? kopiaData.error : null,
       kopiaUiUrl: kopiaData?.ui_url || null,
       loading: isLoading,
     };
-  }, [demo, data, hubBackupData, kopiaData, isLoading]);
+  }, [demo, data, hubBackupData, kopiaData, sqlOffsiteData, isLoading]);
 
   const openRestore = useCallback((site, source = "hub") => { setRestoreSource(source); setRestoreSite(site); }, []);
   const closeRestore = useCallback(() => setRestoreSite(null), []);

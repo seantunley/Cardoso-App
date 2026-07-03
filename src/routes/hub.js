@@ -421,6 +421,37 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     }
   });
 
+  // GET /api/hub/kopia-sql-status
+  // Aggregate: the SQL-off-site verdict for EVERY site in one call, so the fleet
+  // table can show a per-site "SQL reached the hub" dot without N round-trips.
+  // Polled less often than kopia-status (SQL backups are nightly) — see the page.
+  // Read-only; each site's newest snapshot is read in parallel.
+  router.get('/api/hub/kopia-sql-status', requireAuth, requirePermission('can_access_hub_backups'), async (req, res) => {
+    try {
+      if (!isKopiaEnabled()) return res.json({ enabled: false, sites: [], error: null });
+      let knownSites = [];
+      try { knownSites = db.prepare('SELECT id, name, slug FROM hub_sites WHERE COALESCE(in_env, 1) = 1').all(); } catch { /* table not ready */ }
+      const allowed = getAllowedSiteIds(req, res);
+      if (allowed !== null) knownSites = knownSites.filter((s) => allowed.has(s.id));
+
+      const status = await getKopiaStatus({ knownSites });
+      const staleHours = getKopiaStaleHours();
+      const sites = await Promise.all(
+        (status.sites || [])
+          .filter((s) => s.site_id && (allowed === null || allowed.has(s.site_id)))
+          .map(async (s) => {
+            if (!s.last_root_id) return { site_id: s.site_id, site_name: s.site_name, status: 'never', reason: 'no_snapshot', databases: [], newest_at: null, age_hours: null };
+            const v = await collectSqlOffsite({ rootID: s.last_root_id, staleHours });
+            return { site_id: s.site_id, site_name: s.site_name, ...v };
+          }),
+      );
+      res.json({ enabled: true, sites, error: status.error || null });
+    } catch (err) {
+      console.error('[hub-kopia-sql-status] error:', err.message);
+      res.json({ enabled: isKopiaEnabled(), sites: [], error: err.message });
+    }
+  });
+
   // GET /api/hub/sites/:site_id/sql-offsite
   // Verdict on whether this site's SQL Server backups (Ola .bak) actually made
   // it off-site and are fresh — read from the site's NEWEST snapshot. Powers the
