@@ -12,11 +12,12 @@
 // `RULES`. Tests pin each rule's fire/resolve transitions.
 
 import db from '../db/index.js';
-import { fireAlert, resolveAlerts } from './alertEngine.js';
+import { fireAlert, resolveAlerts, updateActiveAlert } from './alertEngine.js';
 import { getSageHealth } from '../services/batReconciliation.js';
 import { ruleSecuritySignals } from './securitySignals.js';
 import { computeBackupHealth } from './backupHealth.js';
 import { getKopiaStatus, isKopiaEnabled } from '../services/hub/kopiaStatus.js';
+import { getRoleConnectionId } from '../services/connectionRoles.js';
 
 // Lazy-prepared statement cache. Mirrors the pattern in alertEngine.js so
 // the rule loop (evaluateAllRules, runs every minute) doesn't re-allocate
@@ -319,6 +320,166 @@ async function ruleNightlySyncStale() {
   }
 }
 
+// ── Rule: JTI monthly export missing ─────────────────────────────────────
+//
+// The JTI Sales export is generated on the 1st at 02:00 (jti-monthly-export),
+// with a boot catch-up, a 09:00 daily self-heal, and an hourly generation
+// retry as safety nets. Every one of those paths records a skip
+// (pool_unavailable, or a fire dropped because the main thread was frozen at
+// the scheduled minute) as a SUCCESSFUL job run, and node-cron never replays a
+// missed fire — so a month that genuinely never got produced is invisible on
+// both the schedule panel (which only shows the NEXT fire, identical whether
+// last month ran or not) and Job Runs (green skips). Operators only found out
+// by manually checking the archive list.
+//
+// This rule alerts on the ARTIFACT, not the run: on a JTI site, if the PREVIOUS
+// calendar month has no archive, fire one deduped warning. It holds off until
+// 10:00 on the 1st so the 02:00 cron + boot catch-up + 09:00 self-heal have all
+// had their shot before it complains. The message carries WHY from the most
+// recent generation attempt (pool down / never fired / threw). Auto-resolves
+// the moment the month lands (the hourly retry, a restart's catch-up, or a
+// manual export).
+//
+// "Is this a JTI site?" is answered by the jti_export connection routing FIRST,
+// then archive history as a fallback. Routing is the authoritative signal and,
+// crucially, catches a freshly-onboarded site whose VERY FIRST month-end fails —
+// archive history alone would have no scheduled row yet and stay silent exactly
+// when the operator most needs the alert.
+//
+// Site-only (HUB_MODE receives archives via push, it doesn't generate them).
+async function ruleJtiExportMissing() {
+  if (process.env.HUB_MODE === 'true') return;
+
+  // Per-period dedup key so each missing month is its own alert. A single fixed
+  // key would let a NEWER month's success resolve an OLDER month's still-valid
+  // alert (June missing, alert fires in July; a normal July archive on Aug 1
+  // must NOT clear the June alert).
+  const keyFor = (yr, mn) => `jti-export-missing:${yr}-${String(mn).padStart(2, '0')}`;
+
+  const listActiveMissing = () => {
+    try {
+      return _prep('activeJtiMissing', `
+        SELECT dedup_key FROM alerts
+        WHERE resolved_at IS NULL AND dedup_key LIKE 'jti-export-missing:%'
+      `).all();
+    } catch { return []; }
+  };
+
+  const jtiRouted = Boolean(getRoleConnectionId('jti_export'));
+  let everScheduled = false;
+  if (!jtiRouted) {
+    try {
+      everScheduled = Boolean(_prep('jtiEverScheduled', `
+        SELECT 1 FROM jti_archive WHERE source = 'scheduled' LIMIT 1
+      `).get());
+    } catch (err) {
+      if (/no such table/i.test(err.message)) return; // JTI module not installed
+      throw err;
+    }
+  }
+  // Not a JTI site: no jti_export routing configured AND never produced a
+  // scheduled export. Nothing to enforce; clear any stale per-period alerts.
+  if (!jtiRouted && !everScheduled) {
+    for (const a of listActiveMissing()) resolveAlerts(a.dedup_key, 'auto');
+    return;
+  }
+
+  // A jti_archive row is only ever written for a full calendar month (partial
+  // exports stay download-only), so a source='manual' row means the operator
+  // produced that month by hand — the remediation for this very alert. Count it
+  // as present alongside 'scheduled'.
+  const periodArchived = (yr, mn) => {
+    try {
+      return Boolean(_prep('jtiPeriodArchived', `
+        SELECT 1 FROM jti_archive
+        WHERE period_year = ? AND period_month = ? AND source IN ('scheduled', 'manual')
+        LIMIT 1
+      `).get(yr, mn));
+    } catch (err) {
+      if (/no such table/i.test(err.message)) return false;
+      throw err;
+    }
+  };
+
+  // Heal any active per-period alert whose month has SINCE been archived (a late
+  // boot catch-up / retry / manual export finally produced it) — independent of
+  // the grace window and of which month we check below. Each key carries its own
+  // period, so this only ever clears the month that was actually produced.
+  for (const a of listActiveMissing()) {
+    const m = /^jti-export-missing:(\d{4})-(\d{2})$/.exec(a.dedup_key);
+    if (m && periodArchived(Number(m[1]), Number(m[2]))) resolveAlerts(a.dedup_key, 'auto');
+  }
+
+  const now = new Date();
+  // Hold off until the 1st-of-month heal window (02:00 cron → boot catch-up →
+  // 09:00 daily-ensure) has fully passed, so we never fire during the few hours
+  // a fresh month is legitimately still being generated. Uses server-local time
+  // to match the crons (which are also server-local).
+  if (now.getDate() === 1 && now.getHours() < 10) return;
+
+  const y = now.getFullYear();
+  const mo = now.getMonth() + 1; // 1..12
+  const prevYear = mo === 1 ? y - 1 : y;
+  const prevMonth = mo === 1 ? 12 : mo - 1;
+  const dedupKey = keyFor(prevYear, prevMonth);
+
+  // Previous month present (scheduled or manual) → nothing to fire; the heal
+  // loop above already cleared any active alert for it.
+  if (periodArchived(prevYear, prevMonth)) return;
+
+  // Missing. Pull the most recent attempt across all JTI generation jobs so the
+  // message can say WHY it didn't land — the whole point is that a silent skip
+  // (recorded as job success) stops being invisible.
+  let lastRun = null;
+  try {
+    lastRun = _prep('jtiLastGenAttempt', `
+      SELECT name, status, error_message, context, started_at
+      FROM job_runs
+      WHERE name IN ('jti-monthly-export', 'jti-daily-ensure', 'jti-boot-catchup', 'jti-generation-retry')
+      ORDER BY started_at DESC LIMIT 1
+    `).get();
+  } catch (err) {
+    if (!/no such table/i.test(err.message)) throw err;
+  }
+
+  const period = `${prevYear}-${String(prevMonth).padStart(2, '0')}`;
+  let why;
+  if (!lastRun) {
+    why = 'No generation attempt has run at all yet.';
+  } else if (lastRun.status === 'failed') {
+    why = `The most recent attempt (${lastRun.name}) failed: ${lastRun.error_message || 'unknown error'}.`;
+  } else {
+    // Succeeded-but-didn't-produce: the skip reason (pool_unavailable etc.)
+    // rides in the run context — dig it out so the operator sees the cause.
+    let reason = '';
+    try {
+      const ctx = JSON.parse(lastRun.context || '{}');
+      reason = ctx?.failed?.error || ctx?.reason || '';
+    } catch { /* context not JSON — leave reason blank */ }
+    why = reason
+      ? `The most recent attempt (${lastRun.name}) skipped it: ${reason}.`
+      : `The most recent attempt (${lastRun.name}) completed without producing it — the 02:00 fire may have been dropped by a main-thread freeze, or the JTI Sage pool was unavailable.`;
+  }
+
+  const message = `JTI monthly export for ${period} has not been produced. ${why} It should self-heal within the hour via the generation-retry tick (or on the next restart); if this alert persists, the JTI Sage pool is likely unreachable on this site.`;
+  const context = {
+    period,
+    period_year: prevYear,
+    period_month: prevMonth,
+    last_attempt_job: lastRun?.name || null,
+    last_attempt_status: lastRun?.status || null,
+    last_attempt_error: lastRun?.error_message || null,
+    last_attempt_at: lastRun?.started_at || null,
+  };
+  const fired = fireAlert({ ruleName: 'jti-export-missing', severity: 'warning', message, context, dedupKey });
+  // The condition can persist across many ticks while the REASON evolves — e.g.
+  // the alert engine's minute-pass fires "No generation attempt" before the 45s
+  // boot catch-up runs, then that catch-up records a pool_unavailable failure.
+  // fireAlert dedups and won't refresh the message, so update the active row to
+  // reflect the latest attempt.
+  if (fired?.deduped) updateActiveAlert(dedupKey, { message, context });
+}
+
 // ── Rule: Kopia off-site backup stale / missing (hub-only) ───────────────
 //
 // The hub runs the Kopia repository server; every site agent pushes snapshots
@@ -425,6 +586,7 @@ const RULES = [
   { name: 'backup-artifact-stale', fn: ruleBackupArtifactStale },
   { name: 'job-failure-spike', fn: ruleJobFailureSpike },
   { name: 'nightly-sync-stale', fn: ruleNightlySyncStale },
+  { name: 'jti-export-missing', fn: ruleJtiExportMissing },
   { name: 'kopia-site-stale', fn: ruleKopiaSiteStale },
   // Security signals — brute-force, flood, scanner detection. Rule
   // owner lives next to the metric collection in src/lib/securitySignals.js
