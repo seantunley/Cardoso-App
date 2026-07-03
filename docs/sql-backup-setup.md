@@ -9,9 +9,13 @@ backup. Ola Hallengren makes the SQL backups; Kopia does the copy + dedup + GFS.
 - The company DB is ~134 GB → the compressed `.bak` is ~10 GB, and it can't be
   stored uncompressed on the box. So **backup compression stays on.**
 - Compressed fulls **dedup poorly** in Kopia, so a nightly *full* would push
-  ~10 GB off-site every night. Instead: **weekly FULL (Sunday) + nightly DIFF
-  (Mon–Sat).** The diff is only what changed since Sunday — small — so the
-  nightly off-site upload is small; the 10 GB full moves once a week.
+  ~10 GB off-site every night. Instead: **weekly FULL (Saturday 22:00) + nightly
+  DIFF (Sun–Fri 01:00).** The diff is only what changed since the full — small —
+  so the nightly off-site upload is small; the 10 GB full moves once a week.
+- **Timing matters:** the Kopia agent snapshots the app folder at **02:30**. Both
+  SQL jobs must *finish* before then, or Kopia can capture a `.bak` mid-write. The
+  DIFF (01:00, small) finishes in minutes; the big FULL runs **Saturday 22:00** so
+  it has ~4.5 h of headroom before the Sunday 02:30 snapshot carries it off-site.
 - The `.bak`s land in `C:\Cardoso Customer App\database\sql-backups`, which is
   **inside the folder the Kopia agent snapshots** and **not** in `.kopiaignore`,
   so they ride off-site automatically. Kopia dedups + GFS-retains from the hub;
@@ -59,9 +63,10 @@ set `@CreateJobs='N'` and run it against `master` in SSMS.)
 ### 3. Recovery models + backup jobs (SSMS)
 Open `scripts/sql-backup-config.sql`, **confirm the DB names**, run it (F5).
 It sets all three DBs to SIMPLE and **creates + configures** the two Agent jobs —
-**FULL weekly (Sun 01:00)** + **DIFF nightly (Mon–Sat 01:00)** with 9-day local
-retention. (It's the script — not dbatools — that creates the jobs, so it's fine
-that step 2 installed procedures only. Re-runnable.)
+**FULL weekly (Sat 22:00)** + **DIFF nightly (Sun–Fri 01:00)** with 9-day local
+retention, timed to finish before the 02:30 Kopia snapshot. (It's the script —
+not dbatools — that creates the jobs, so it's fine that step 2 installed
+procedures only. Re-runnable.)
 
 If CARSYS (or any DB) was in FULL recovery its log may be bloated — reclaim it:
 ```sql

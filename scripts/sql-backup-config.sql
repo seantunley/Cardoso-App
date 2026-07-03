@@ -9,10 +9,12 @@
 --      recovery point; we don't need minute-level point-in-time, so SIMPLE
 --      avoids transaction-log growth and log-backup management.
 --   2. CREATES (if missing) and configures the two backup jobs — weekly FULL
---      (Sunday) + nightly DIFF (Mon–Sat) — writing compressed .bak into the
---      folder the Kopia agent already snapshots off-site. Full is ~10GB
+--      (Saturday 22:00) + nightly DIFF (Sun–Fri 01:00) — writing compressed .bak
+--      into the folder the Kopia agent already snapshots off-site. Full is ~10GB
 --      (compressed, can't store uncompressed at 134GB), so nightly DIFFs keep
---      the off-site upload small; Kopia dedups + GFS-retains from the hub.
+--      the off-site upload small; Kopia dedups + GFS-retains from the hub. Both
+--      jobs finish before the 02:30 Kopia snapshot so no .bak is captured
+--      mid-write.
 --   9-day (@CleanupTime=220h) local retention keeps `full + latest diff` on the
 --   box for restore; Kopia holds the long-tail off-site.
 --
@@ -69,29 +71,43 @@ END
 ELSE
   EXEC dbo.sp_update_jobstep @job_name = @diff, @step_id = 1, @database_name = N'master', @command = @diffCmd;
 
-/* Drop Ola's default daily schedule if a pre-existing job still has it. */
-IF EXISTS (SELECT 1 FROM dbo.sysschedules WHERE name = N'Daily-0100')
+/* Drop Ola's default daily schedule ONLY if it is actually attached to @full
+   (a shared 'Daily-0100' might belong to another Agent job — detaching from a
+   job it isn't on would error and stop the script). */
+IF EXISTS (
+  SELECT 1 FROM dbo.sysjobschedules js
+  JOIN dbo.sysschedules s ON js.schedule_id = s.schedule_id
+  JOIN dbo.sysjobs j ON js.job_id = j.job_id
+  WHERE j.name = @full AND s.name = N'Daily-0100')
   EXEC dbo.sp_detach_schedule @job_name = @full, @schedule_name = N'Daily-0100', @delete_unused_schedule = 1;
 
-/* FULL → weekly Sunday 01:00 (freq_type 8 = weekly, freq_interval 1 = Sunday). */
-IF NOT EXISTS (SELECT 1 FROM dbo.sysschedules WHERE name = N'Weekly-Sun-0100')
-  EXEC dbo.sp_add_schedule @schedule_name = N'Weekly-Sun-0100', @freq_type = 8, @freq_interval = 1, @freq_recurrence_factor = 1, @active_start_time = 010000;
-IF NOT EXISTS (
-  SELECT 1 FROM dbo.sysjobschedules js
-  JOIN dbo.sysschedules s ON js.schedule_id = s.schedule_id
-  JOIN dbo.sysjobs j ON js.job_id = j.job_id
-  WHERE j.name = @full AND s.name = N'Weekly-Sun-0100')
-  EXEC dbo.sp_attach_schedule @job_name = @full, @schedule_name = N'Weekly-Sun-0100';
+/* Timing invariant: both jobs must FINISH before the Kopia agent snapshots the
+   app folder at 02:30 (scripts/kopia-agent-setup.ps1), or the snapshot could
+   capture a .bak mid-write. The DIFF is small and runs 01:00 (done in minutes).
+   The weekly FULL is ~10GB (from a 134GB DB) + verify, so it runs SATURDAY 22:00
+   — ~4.5h of headroom before the Sunday 02:30 snapshot carries the finished
+   file off-site. */
 
-/* DIFF → nightly Mon–Sat 01:00 (freq_interval 126 = Mon..Sat bitmask). */
-IF NOT EXISTS (SELECT 1 FROM dbo.sysschedules WHERE name = N'Weekly-MonSat-0100')
-  EXEC dbo.sp_add_schedule @schedule_name = N'Weekly-MonSat-0100', @freq_type = 8, @freq_interval = 126, @freq_recurrence_factor = 1, @active_start_time = 010000;
+/* FULL → weekly Saturday 22:00 (freq_type 8 = weekly, freq_interval 64 = Sat). */
+IF NOT EXISTS (SELECT 1 FROM dbo.sysschedules WHERE name = N'Weekly-Sat-2200')
+  EXEC dbo.sp_add_schedule @schedule_name = N'Weekly-Sat-2200', @freq_type = 8, @freq_interval = 64, @freq_recurrence_factor = 1, @active_start_time = 220000;
 IF NOT EXISTS (
   SELECT 1 FROM dbo.sysjobschedules js
   JOIN dbo.sysschedules s ON js.schedule_id = s.schedule_id
   JOIN dbo.sysjobs j ON js.job_id = j.job_id
-  WHERE j.name = @diff AND s.name = N'Weekly-MonSat-0100')
-  EXEC dbo.sp_attach_schedule @job_name = @diff, @schedule_name = N'Weekly-MonSat-0100';
+  WHERE j.name = @full AND s.name = N'Weekly-Sat-2200')
+  EXEC dbo.sp_attach_schedule @job_name = @full, @schedule_name = N'Weekly-Sat-2200';
+
+/* DIFF → nightly Sun–Fri 01:00 (freq_interval 63 = Sun..Fri bitmask; Saturday is
+   excluded because the FULL already covers Saturday night). */
+IF NOT EXISTS (SELECT 1 FROM dbo.sysschedules WHERE name = N'Daily-SunFri-0100')
+  EXEC dbo.sp_add_schedule @schedule_name = N'Daily-SunFri-0100', @freq_type = 8, @freq_interval = 63, @freq_recurrence_factor = 1, @active_start_time = 010000;
+IF NOT EXISTS (
+  SELECT 1 FROM dbo.sysjobschedules js
+  JOIN dbo.sysschedules s ON js.schedule_id = s.schedule_id
+  JOIN dbo.sysjobs j ON js.job_id = j.job_id
+  WHERE j.name = @diff AND s.name = N'Daily-SunFri-0100')
+  EXEC dbo.sp_attach_schedule @job_name = @diff, @schedule_name = N'Daily-SunFri-0100';
 GO
 
-PRINT 'SQL backup config applied: CARDAT/CARSYS/PPDdata SIMPLE; FULL weekly (Sun 01:00) + DIFF nightly (Mon-Sat 01:00), 9-day local retention.';
+PRINT 'SQL backup config applied: CARDAT/CARSYS/PPDdata SIMPLE; FULL weekly (Sat 22:00) + DIFF nightly (Sun-Fri 01:00), 9-day local retention. Both finish before the 02:30 Kopia snapshot.';
