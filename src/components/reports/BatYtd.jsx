@@ -143,10 +143,10 @@ export default function BatYtd() {
                     <td className="px-2 py-1.5 text-right font-mono tabular-nums text-foreground td-right">
                       <span className="text-muted-subtle mr-1">R</span>{fmtR(f.sage)}
                     </td>
-                    <td className="px-2 py-1.5 text-right font-mono tabular-nums td-right" style={{ color: Math.abs(f.variance) < 0.01 ? 'hsl(145 55% 45%)' : 'hsl(0 72% 50%)' }}>
+                    <td className="px-2 py-1.5 text-right font-mono tabular-nums td-right" style={{ color: Math.abs(f.variance) < 0.01 ? 'hsl(var(--status-ok))' : 'hsl(var(--status-critical))' }}>
                       <span className="opacity-60 mr-1">R</span>{fmtRSigned(f.variance)}
                     </td>
-                    <td className="px-2 py-1.5 text-right font-mono tabular-nums td-right" style={{ color: Math.abs(f.variance_pct) < 0.5 ? 'hsl(145 55% 45%)' : 'hsl(0 72% 50%)' }}>
+                    <td className="px-2 py-1.5 text-right font-mono tabular-nums td-right" style={{ color: Math.abs(f.variance_pct) < 0.5 ? 'hsl(var(--status-ok))' : 'hsl(var(--status-critical))' }}>
                       {fmtPct(f.variance_pct, 2)}
                     </td>
                   </tr>
@@ -161,7 +161,7 @@ export default function BatYtd() {
                   <td className="px-2 py-2 text-right font-mono tabular-nums text-foreground td-right">
                     <span className="text-muted-subtle mr-1">R</span>{fmtR(summary.total_sage)}
                   </td>
-                  <td className="px-2 py-2 text-right font-mono tabular-nums td-right" style={{ color: Math.abs(summary.total_variance) < 1 ? 'hsl(145 55% 45%)' : 'hsl(0 72% 50%)' }}>
+                  <td className="px-2 py-2 text-right font-mono tabular-nums td-right" style={{ color: Math.abs(summary.total_variance) < 1 ? 'hsl(var(--status-ok))' : 'hsl(var(--status-critical))' }}>
                     <span className="opacity-60 mr-1">R</span>{fmtRSigned(summary.total_variance)}
                   </td>
                   <td className="px-2 py-2"></td>

@@ -293,7 +293,7 @@ export default function Jti() {
           >
             <div
               className="absolute left-0 top-0 bottom-0 w-[2px]"
-              style={{ background: 'hsl(var(--destructive))', boxShadow: '0 0 10px hsla(0,72%,50%,0.3)' }}
+              style={{ background: 'hsl(var(--destructive))', boxShadow: '0 0 10px hsl(var(--status-critical) / 0.3)' }}
             />
             <p className="font-mono text-xs text-destructive pl-2 flex items-start gap-2">
               <AlertTriangle className="h-3.5 w-3.5 mt-px flex-shrink-0" strokeWidth={1.75} />
@@ -666,7 +666,7 @@ function HubPushPill({ status, attempts, error }) {
   const config = {
     pushed:          { icon: Check,   label: 'Pushed',    color: 'var(--phosphor)',          bg: 'hsla(33,95%,55%,0.12)' },
     pending:         { icon: Cloud,   label: 'Pending',   color: 'hsl(var(--muted-foreground))', bg: 'hsla(0,0%,100%,0.05)' },
-    failed:          { icon: X,       label: `Failed${attempts > 1 ? ` (${attempts}×)` : ''}`, color: 'hsl(var(--destructive))', bg: 'hsla(0,72%,50%,0.12)' },
+    failed:          { icon: X,       label: `Failed${attempts > 1 ? ` (${attempts}×)` : ''}`, color: 'hsl(var(--destructive))', bg: 'hsl(var(--status-critical) / 0.12)' },
     skipped_no_hub:  { icon: CloudOff, label: 'No hub',   color: 'hsl(var(--muted-foreground))', bg: 'hsla(0,0%,100%,0.05)' },
   }[status] || { icon: Cloud, label: status || 'unknown', color: 'hsl(var(--muted-foreground))', bg: 'hsla(0,0%,100%,0.05)' };
 

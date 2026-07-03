@@ -27,9 +27,9 @@ const MODE_META = {
 };
 // Last-run status dot colours — from job_runs.status.
 const STATUS_DOT = {
-  succeeded: 'hsl(145 55% 45%)',
-  failed:    'hsl(0 72% 50%)',
-  started:   'hsl(50 90% 55%)',
+  succeeded: 'hsl(var(--status-ok))',
+  failed:    'hsl(var(--status-critical))',
+  started:   'hsl(var(--status-warn))',
 };
 
 function humanizeMs(ms) {

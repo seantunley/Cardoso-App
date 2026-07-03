@@ -26,6 +26,7 @@ import { createDrRouter } from './src/routes/dr.js';
 import { createSystemRouter } from './src/routes/system.js';
 import { createCreditLogicRouter } from './src/routes/creditLogic.js';
 import { createCollectionsRouter } from './src/routes/collections.js';
+import { createSearchRouter } from './src/routes/search.js';
 import { createNetworkDevicesRouter } from './src/routes/networkDevices.js';
 import { initBatSchema } from './src/db/batSchema.js';
 import { createBatReconciliationRouter } from './src/routes/batReconciliation.js';
@@ -225,6 +226,7 @@ app.use(createBackupRouter());
 app.use(createDrRouter());
 app.use(createReportingRouter({ requireAuth, requirePermission }));
 app.use(createCollectionsRouter({ requireAuth, requirePermission }));
+app.use(createSearchRouter({ db, requireAuth }));
 app.use(createNetworkDevicesRouter({ requireAuth, requireAdmin, requirePermission }));
 app.use(createConnectionsRouter({ db, requireAuth, requirePermission, isShuttingDown }));
 

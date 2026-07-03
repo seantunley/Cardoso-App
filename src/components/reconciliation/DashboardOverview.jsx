@@ -60,16 +60,16 @@ export default function DashboardOverview({ data }) {
           label="Total Sage"
           value={<><span className="text-muted-subtle text-3xl mr-1.5">R</span>{fmt(summary.totalSage)}</>}
           sub="posted credit notes"
-          accent="hsl(145 55% 45%)"
-          glow="hsla(145, 55%, 45%, 0.25)"
+          accent="hsl(var(--status-ok))"
+          glow="hsl(var(--status-ok) / 0.25)"
           tip="Sum of all credit notes actually posted in Sage 300 against the BAT supplier this calendar year."
         />
         <Tile
           label="Total Variance"
           value={<><span className="text-muted-subtle text-3xl mr-1.5">R</span>{fmt(summary.totalVariance)}</>}
           sub={matched ? 'fully reconciled' : summary.totalVariance > 0 ? 'supplier higher' : 'sage higher'}
-          accent={matched ? 'hsl(145 55% 45%)' : 'hsl(var(--destructive))'}
-          glow={matched ? 'hsla(145, 55%, 45%, 0.25)' : 'hsla(0, 72%, 50%, 0.3)'}
+          accent={matched ? 'hsl(var(--status-ok))' : 'hsl(var(--destructive))'}
+          glow={matched ? 'hsl(var(--status-ok) / 0.25)' : 'hsl(var(--status-critical) / 0.3)'}
           tip="Total BAT − Total Sage. Positive = BAT is claiming more than Sage has captured. Negative = Sage has captured more than BAT claimed."
         />
       </div>

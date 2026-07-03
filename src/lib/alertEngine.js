@@ -41,6 +41,11 @@ function stmts() {
       SET resolved_at = ?, resolved_by = ?
       WHERE id = ? AND resolved_at IS NULL
     `),
+    updateActiveByKey: db.prepare(`
+      UPDATE alerts
+      SET message = ?, context = ?
+      WHERE dedup_key = ? AND resolved_at IS NULL
+    `),
     listActive: db.prepare(`
       SELECT id, rule_name, severity, message, context, dedup_key, fired_at
       FROM alerts
@@ -115,6 +120,24 @@ export function fireAlert({ ruleName, severity, message, context, dedupKey }) {
 export function resolveAlerts(dedupKey, by = 'auto') {
   const info = stmts().resolveByKey.run(new Date().toISOString(), by, dedupKey);
   return info.changes;
+}
+
+/**
+ * Refresh the message + context of the currently-active alert for a dedup_key,
+ * WITHOUT resetting fired_at. For a rule whose condition persists but whose
+ * detail changes over time — e.g. the JTI missing-export reason moving from "no
+ * attempt yet" to "pool_unavailable" once the boot catch-up runs — this keeps
+ * the single active row reflecting the LATEST state. fireAlert dedups on the key
+ * and never updates, so without this the message freezes at the first-observed
+ * value. No-op when no active alert exists for the key.
+ *
+ * @param {string} dedupKey
+ * @param {{ message: string, context?: object }} fields
+ * @returns {number} rows updated (0 or 1)
+ */
+export function updateActiveAlert(dedupKey, { message, context } = {}) {
+  const ctxJson = context == null ? null : JSON.stringify(context);
+  return stmts().updateActiveByKey.run(message, ctxJson, dedupKey).changes;
 }
 
 /** Mark a single alert resolved by id. Used by the admin acknowledge endpoint. */

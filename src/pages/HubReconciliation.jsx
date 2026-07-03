@@ -254,16 +254,16 @@ function SiteCard({ site }) {
   const daysSinceSync = workingDaysSinceSync(site.synced_at);
   let badge;
   if (hasError) {
-    badge = { color: 'hsl(var(--destructive))', glow: 'hsla(0, 72%, 50%, 0.4)', Icon: AlertTriangle, label: 'Sync error' };
+    badge = { color: 'hsl(var(--destructive))', glow: 'hsl(var(--status-critical) / 0.4)', Icon: AlertTriangle, label: 'Sync error' };
   } else if (noData) {
     badge = { color: 'hsl(280 70% 65%)', glow: 'hsla(280, 70%, 55%, 0.4)', Icon: CloudOff, label: 'Awaiting data' };
   } else if (stale) {
     // Stale takes precedence over Matched/Mismatch — the data MIGHT be
     // matched but it's days old; operator needs to know the freshness
     // problem before they trust the variance numbers.
-    badge = { color: REPORT_COLORS.warning, glow: 'hsla(50, 90%, 55%, 0.4)', Icon: Clock, label: `Stale · ${daysSinceSync}d` };
+    badge = { color: REPORT_COLORS.warning, glow: 'hsl(var(--status-warn) / 0.4)', Icon: Clock, label: `Stale · ${daysSinceSync}d` };
   } else if (matched) {
-    badge = { color: 'hsl(145 55% 45%)', glow: 'hsla(145, 55%, 45%, 0.4)', Icon: CheckCircle, label: 'Matched' };
+    badge = { color: 'hsl(var(--status-ok))', glow: 'hsl(var(--status-ok) / 0.4)', Icon: CheckCircle, label: 'Matched' };
   } else {
     badge = { color: 'var(--phosphor)', glow: 'hsla(33, 95%, 55%, 0.4)', Icon: AlertTriangle, label: 'Mismatch' };
   }
@@ -441,7 +441,7 @@ function LabelWithTip({ tooltip, className, children }) {
 function DataRow({ label, value, muted, variance, tooltip }) {
   let color;
   if (variance != null) {
-    color = Math.abs(variance) < 0.01 ? 'hsl(145 55% 45%)' : (variance > 0 ? 'hsl(var(--destructive))' : 'hsl(33 95% 55%)');
+    color = Math.abs(variance) < 0.01 ? 'hsl(var(--status-ok))' : (variance > 0 ? 'hsl(var(--destructive))' : 'hsl(33 95% 55%)');
   }
   return (
     <div className="flex items-baseline justify-between gap-2">

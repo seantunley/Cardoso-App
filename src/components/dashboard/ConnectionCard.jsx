@@ -6,23 +6,23 @@ import { formatDistanceToNow } from "date-fns";
 
 export default function ConnectionCard({ connection, onSync, onEdit, onDelete, isSyncing }) {
   const statusColors = {
-    active:   "bg-[hsl(145_55%_45%)]/10 text-[hsl(145_55%_45%)] border-[hsl(145_55%_45%)]/30",
+    active:   "bg-status-ok/10 text-status-ok border-status-ok/30",
     inactive: "bg-muted text-muted-foreground border-border",
     error:    "bg-destructive/10 text-destructive border-destructive/30",
     testing:  "bg-accent/10 text-accent border-accent/30",
   };
 
   const accentBar = {
-    active:   "hsl(145 55% 45%)",
+    active:   "hsl(var(--status-ok))",
     inactive: "hsl(30 10% 42%)",
     error:    "hsl(var(--destructive))",
     testing:  "var(--phosphor)",
   }[connection.status] || "hsl(var(--border))";
 
   const accentGlow = {
-    active:   "hsla(145, 55%, 45%, 0.3)",
+    active:   "hsl(var(--status-ok) / 0.3)",
     inactive: "transparent",
-    error:    "hsla(0, 72%, 50%, 0.3)",
+    error:    "hsl(var(--status-critical) / 0.3)",
     testing:  "hsla(33, 95%, 55%, 0.35)",
   }[connection.status] || "transparent";
 
@@ -75,7 +75,7 @@ export default function ConnectionCard({ connection, onSync, onEdit, onDelete, i
             </Button>
           )}
           {typeof onDelete === "function" && (
-            <Button variant="outline" size="icon" className="h-9 w-9 text-destructive hover:border-[hsl(var(--destructive))] hover:bg-[hsla(0,72%,50%,0.18)]" onClick={() => onDelete(connection)}>
+            <Button variant="outline" size="icon" className="h-9 w-9 text-destructive hover:border-[hsl(var(--destructive))] hover:bg-status-critical/[0.18]" onClick={() => onDelete(connection)}>
               <Trash2 className="w-4 h-4" />
             </Button>
           )}

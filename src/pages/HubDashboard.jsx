@@ -122,7 +122,7 @@ const SiteCard = memo(function SiteCard({
     <div
       className={cn(
         "relative border bg-card p-4 space-y-3 transition-all overflow-hidden",
-        isOrphan ? "border-amber-500/40 hover:border-amber-500/60" : "border-border hover:border-[var(--phosphor)]",
+        isOrphan ? "border-status-warn/40 hover:border-status-warn/60" : "border-border hover:border-[var(--phosphor)]",
       )}
       style={{ borderRadius: "14px", boxShadow: "0 1px 2px rgba(0,0,0,0.25)" }}
     >
@@ -130,11 +130,11 @@ const SiteCard = memo(function SiteCard({
         className="absolute left-0 right-0 bottom-0 h-[2px]"
         style={{
           background: isOrphan
-            ? "hsl(38 92% 50%)"
-            : isOnline ? "hsl(145 55% 45%)" : "hsl(var(--destructive))",
+            ? "hsl(var(--status-warn))"
+            : isOnline ? "hsl(var(--status-ok))" : "hsl(var(--destructive))",
           boxShadow: isOrphan
-            ? "0 0 10px hsla(38,92%,50%,0.3)"
-            : isOnline ? "0 0 10px hsla(145,55%,45%,0.3)" : "0 0 10px hsla(0,72%,50%,0.3)",
+            ? "0 0 10px hsl(var(--status-warn) / 0.3)"
+            : isOnline ? "0 0 10px hsl(var(--status-ok) / 0.3)" : "0 0 10px hsl(var(--status-critical) / 0.3)",
         }}
       />
       {/* Header — status is the visual anchor on the LEFT (large dot +

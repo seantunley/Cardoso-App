@@ -18,9 +18,9 @@ function relativeTime(dateStr) {
 }
 
 const FLAGS = [
-  { key: "red",    label: "blocked",    hue: "hsl(0 72% 50%)",   glow: "hsla(0, 72%, 50%, 0.35)" },
+  { key: "red",    label: "blocked",    hue: "hsl(var(--status-critical))",   glow: "hsl(var(--status-critical) / 0.35)" },
   { key: "orange", label: "attention",  hue: "hsl(33 95% 55%)",  glow: "hsla(33, 95%, 55%, 0.35)" },
-  { key: "green",  label: "good",       hue: "hsl(145 55% 45%)", glow: "hsla(145, 55%, 45%, 0.25)" },
+  { key: "green",  label: "good",       hue: "hsl(var(--status-ok))", glow: "hsl(var(--status-ok) / 0.25)" },
   { key: "none",   label: "unflagged",  hue: "hsl(30 10% 42%)",  glow: "transparent" },
 ];
 
@@ -198,7 +198,7 @@ export default function Dashboard() {
             <div className="flex items-center gap-5">
               <div
                 className="w-1 h-10"
-                style={{ background: "hsl(0 72% 50%)", boxShadow: "0 0 20px hsla(0, 72%, 50%, 0.5)" }}
+                style={{ background: "hsl(var(--status-critical))", boxShadow: "0 0 20px hsl(var(--status-critical) / 0.5)" }}
               />
               <div>
                 <div className="font-display text-2xl leading-tight text-foreground">

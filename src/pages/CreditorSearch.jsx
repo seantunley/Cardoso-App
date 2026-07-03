@@ -185,8 +185,8 @@ export default function CreditorSearch() {
             label="True Outstanding"
             value={`R ${fmtR(trueOutstanding)}`}
             sub="All active vendors · incl. unposted"
-            hue="hsl(0 72% 50%)"
-            glow="hsla(0,72%,50%,0.3)"
+            hue="hsl(var(--status-critical))"
+            glow="hsl(var(--status-critical) / 0.3)"
             icon={Wallet}
           />
           <StatTile
@@ -241,14 +241,14 @@ export default function CreditorSearch() {
           <div
             className="absolute left-0 top-0 bottom-0 w-[2px]"
             style={{
-              background: captureStale ? "hsl(0 72% 50%)" : "hsl(145 55% 45%)",
-              boxShadow: captureStale ? "0 0 12px hsla(0,72%,50%,0.3)" : "0 0 12px hsla(145,55%,45%,0.3)",
+              background: captureStale ? "hsl(var(--status-critical))" : "hsl(var(--status-ok))",
+              boxShadow: captureStale ? "0 0 12px hsl(var(--status-critical) / 0.3)" : "0 0 12px hsl(var(--status-ok) / 0.3)",
             }}
           />
           <div className="flex items-start gap-3 pl-2">
-            <Database className="w-4 h-4 mt-0.5 shrink-0" style={{ color: captureStale ? "hsl(0 72% 50%)" : "hsl(145 55% 45%)" }} strokeWidth={1.5} />
+            <Database className="w-4 h-4 mt-0.5 shrink-0" style={{ color: captureStale ? "hsl(var(--status-critical))" : "hsl(var(--status-ok))" }} strokeWidth={1.5} />
             <div className="flex-1">
-              <h3 className="font-mono text-[10px] uppercase tracking-[0.2em] mb-1" style={{ color: captureStale ? "hsl(0 72% 50%)" : "hsl(145 55% 45%)" }}>
+              <h3 className="font-mono text-[10px] uppercase tracking-[0.2em] mb-1" style={{ color: captureStale ? "hsl(var(--status-critical))" : "hsl(var(--status-ok))" }}>
                 {captureStale ? "Capture Behind" : "Capture Current"}
               </h3>
               <p className="text-xs text-muted-foreground">

@@ -22,9 +22,9 @@ import { useSearchParamState } from "../hooks/useSearchParamState.js";
 // A/P monthly periods for the aging tiles (matches the Aged Creditors report).
 const AP_TILES = [
   { key: "1-30", label: "1–30 days", color: "hsl(80 60% 45%)" },
-  { key: "31-60", label: "31–60 days", color: "hsl(50 90% 55%)" },
+  { key: "31-60", label: "31–60 days", color: "hsl(var(--status-warn))" },
   { key: "61-90", label: "61–90 days", color: "hsl(33 95% 55%)" },
-  { key: "over-90", label: "Over 90 days", color: "hsl(0 72% 50%)" },
+  { key: "over-90", label: "Over 90 days", color: "hsl(var(--status-critical))" },
 ];
 
 const BALANCE_BUCKETS = [

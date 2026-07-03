@@ -185,7 +185,7 @@ export default function BatWeekly() {
                       <td className="px-2 py-1.5 text-right font-mono tabular-nums text-foreground td-right">
                         {w.sage_present ? <><span className="text-muted-subtle mr-1">R</span>{fmtR(w.sage_total)}</> : '—'}
                       </td>
-                      <td className="px-2 py-1.5 text-right font-mono tabular-nums td-right" style={{ color: w.matched ? 'hsl(145 55% 45%)' : (w.sage_present ? 'hsl(0 72% 50%)' : 'hsl(var(--muted-foreground))') }}>
+                      <td className="px-2 py-1.5 text-right font-mono tabular-nums td-right" style={{ color: w.matched ? 'hsl(var(--status-ok))' : (w.sage_present ? 'hsl(var(--status-critical))' : 'hsl(var(--muted-foreground))') }}>
                         {w.sage_present ? <><span className="opacity-60 mr-1">R</span>{fmtRSigned(w.variance)}</> : '—'}
                       </td>
                       <td className="px-2 py-1.5">
@@ -212,7 +212,7 @@ export default function BatWeekly() {
                     <td className="px-2 py-2 text-right font-mono tabular-nums text-foreground td-right">
                       <span className="text-muted-subtle mr-1">R</span>{fmtR(summary.total_sage)}
                     </td>
-                    <td className="px-2 py-2 text-right font-mono tabular-nums td-right" style={{ color: Math.abs(summary.total_variance) < 1 ? 'hsl(145 55% 45%)' : 'hsl(0 72% 50%)' }}>
+                    <td className="px-2 py-2 text-right font-mono tabular-nums td-right" style={{ color: Math.abs(summary.total_variance) < 1 ? 'hsl(var(--status-ok))' : 'hsl(var(--status-critical))' }}>
                       <span className="opacity-60 mr-1">R</span>{fmtRSigned(summary.total_variance)}
                     </td>
                     <td className="px-2 py-2"></td>

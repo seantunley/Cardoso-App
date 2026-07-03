@@ -227,7 +227,7 @@ export default function FileUpload({ onComplete }) {
         >
           <div
             className="absolute left-0 top-0 bottom-0 w-[2px]"
-            style={{ background: 'hsl(var(--destructive))', boxShadow: '0 0 10px hsla(0,72%,50%,0.3)' }}
+            style={{ background: 'hsl(var(--destructive))', boxShadow: '0 0 10px hsl(var(--status-critical) / 0.3)' }}
           />
           <p className="font-mono text-xs text-destructive pl-2">{error}</p>
         </div>
@@ -256,7 +256,7 @@ export default function FileUpload({ onComplete }) {
         >
           <div
             className="relative max-w-2xl w-full bg-card border border-destructive overflow-hidden"
-            style={{ borderRadius: '12px', boxShadow: '0 0 32px hsla(0, 72%, 50%, 0.25)' }}
+            style={{ borderRadius: '12px', boxShadow: '0 0 32px hsl(var(--status-critical) / 0.25)' }}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="absolute left-0 top-0 bottom-0 w-[3px]" style={{ background: 'hsl(var(--destructive))' }} />

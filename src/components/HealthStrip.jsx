@@ -75,8 +75,19 @@ function segAlerts(data) {
   if (!data) return null;
   const critical = data.criticalAlerts ?? 0;
   const active = data.activeAlerts ?? 0;
+  const jobFails = data.jobFailures24h ?? 0;
+  const errors = data.errors24h ?? 0;
   if (critical > 0) return { tone: "critical", detail: `${critical} critical alert${critical === 1 ? "" : "s"} active — open Operations for details.` };
-  if (active > 0) return { tone: "warn", detail: `${active} active alert${active === 1 ? "" : "s"} — open Operations for details.` };
+  // The server rolls job failures / logged errors into its overall warning
+  // state and the bell surfaces them, so the strip must too — otherwise it
+  // reads green while Operations shows a warning (Codex #512 P2).
+  if (active > 0 || jobFails > 0 || errors > 0) {
+    const parts = [];
+    if (active > 0) parts.push(`${active} active alert${active === 1 ? "" : "s"}`);
+    if (jobFails > 0) parts.push(`${jobFails} job failure${jobFails === 1 ? "" : "s"} (24h)`);
+    if (errors > 0) parts.push(`${errors} error${errors === 1 ? "" : "s"} logged (24h)`);
+    return { tone: "warn", detail: `${parts.join(", ")} — open Operations for details.` };
+  }
   return { tone: "ok", detail: "No active alerts." };
 }
 
@@ -89,16 +100,18 @@ const SEGMENTS = [
 
 export default function HealthStrip({ collapsed, isAdmin }) {
   const navigate = useNavigate();
-  const { data } = useSageHealth();
+  const { data, isError } = useSageHealth();
 
   const segments = SEGMENTS
     .map((s) => ({ ...s, state: s.build(data) }))
     .filter((s) => s.state);
 
-  // Nothing derivable yet (first load, or endpoint erroring — the bell and
-  // Operations surface fetch errors; a wrongly-green strip would be worse
-  // than none).
-  if (segments.length === 0) return null;
+  // Nothing to show, OR the query is erroring. React Query keeps the last
+  // successful `data` on a failed refetch, so reading `data` alone could paint
+  // stale-but-green segments while the endpoint is actually down. The bell and
+  // Operations surface the fetch error; per this module's rule a wrongly-green
+  // strip is worse than none, so hide on error too (Codex #512 P2).
+  if (isError || segments.length === 0) return null;
 
   // Admins can jump to Operations for the full picture; for everyone else
   // the strip is informational (the tooltip carries the detail).

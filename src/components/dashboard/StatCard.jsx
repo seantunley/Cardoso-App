@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 export default function StatCard({ title, value, subtitle, icon: Icon, trend, color = "slate" }) {
   const accentBar = {
     slate:   "hsl(30 10% 42%)",
-    emerald: "hsl(145 55% 45%)",
+    emerald: "hsl(var(--status-ok))",
     amber:   "var(--phosphor)",
     rose:    "hsl(var(--destructive))",
     blue:    "hsl(210 70% 50%)",
@@ -17,9 +17,9 @@ export default function StatCard({ title, value, subtitle, icon: Icon, trend, co
 
   const accentGlow = {
     slate:   "transparent",
-    emerald: "hsla(145, 55%, 45%, 0.25)",
+    emerald: "hsl(var(--status-ok) / 0.25)",
     amber:   "hsla(33, 95%, 55%, 0.35)",
-    rose:    "hsla(0, 72%, 50%, 0.3)",
+    rose:    "hsl(var(--status-critical) / 0.3)",
     blue:    "hsla(210, 70%, 50%, 0.25)",
   }[color] || "transparent";
 
@@ -44,7 +44,7 @@ export default function StatCard({ title, value, subtitle, icon: Icon, trend, co
               <span
                 className={cn(
                   "font-mono text-[10px] tabular-nums",
-                  trend > 0 ? "text-[hsl(145_55%_45%)]" : "text-destructive"
+                  trend > 0 ? "text-status-ok" : "text-destructive"
                 )}
               >
                 {trend > 0 ? "▲" : "▼"}{Math.abs(trend)}%

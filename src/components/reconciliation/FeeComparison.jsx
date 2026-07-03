@@ -8,7 +8,7 @@ const fmt = (v) => {
 };
 
 function ragMeta(status) {
-  if (status === 'green') return { color: 'hsl(145 55% 45%)', label: 'Match',    glyph: '●', tip: 'BAT and Sage agree on this fee within R 0.01.' };
+  if (status === 'green') return { color: 'hsl(var(--status-ok))', label: 'Match',    glyph: '●', tip: 'BAT and Sage agree on this fee within R 0.01.' };
   if (status === 'amber') return { color: 'var(--phosphor)', label: 'Close', glyph: '◐', tip: 'Minor variance — within tolerance but worth a glance.' };
   return                         { color: 'hsl(var(--destructive))', label: 'Mismatch', glyph: '▲', tip: 'Material difference between what BAT claimed and what Sage captured. Needs investigation.' };
 }

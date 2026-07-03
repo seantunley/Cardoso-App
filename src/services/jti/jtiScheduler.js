@@ -62,7 +62,26 @@ function ymd(year, month, day) {
  * @param {(args: any) => Promise<any>} [args.pushToHub]  injectable for tests
  * @returns {Promise<{ status: 'archived'|'skipped', reason?: string, archiveId?: number, rowCount?: number }>}
  */
-export async function generateAndArchivePeriod({ db, getSagePool, year, month, pushToHub = pushArchiveToHub }) {
+// Coalesce concurrent generation of the SAME period across every trigger — the
+// 02:00 monthly cron, the 09:00 daily-ensure, the hourly generation-retry, and
+// the boot catch-up all funnel through here. This function is async and its only
+// idempotency is the hasScheduledArchive pre-check below; two overlapping calls
+// for one month could both pass that check (before either inserts) and then both
+// generate + insert a 'scheduled' row and both push to the hub. jti_archive
+// intentionally allows multiple rows per period (manual re-runs), so there is no
+// DB uniqueness to lean on — serialize in-process per period instead. Sequential
+// (awaited) callers are unaffected: the key clears on settle, so each runs fresh.
+const _inFlightPeriods = new Map();
+export function generateAndArchivePeriod(args) {
+  const key = `${args.year}-${args.month}`;
+  const existing = _inFlightPeriods.get(key);
+  if (existing) return existing;
+  const p = _generateAndArchivePeriod(args).finally(() => { _inFlightPeriods.delete(key); });
+  _inFlightPeriods.set(key, p);
+  return p;
+}
+
+async function _generateAndArchivePeriod({ db, getSagePool, year, month, pushToHub = pushArchiveToHub }) {
   if (hasScheduledArchive({ db, periodYear: year, periodMonth: month })) {
     return { status: 'skipped', reason: 'already_archived' };
   }

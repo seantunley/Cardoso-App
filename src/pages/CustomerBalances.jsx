@@ -10,9 +10,9 @@ import AgingSummaryTiles from "@/components/shared/AgingSummaryTiles";
 // A/R weekly periods for the aging tiles (matches the Aged Debtors report).
 const AR_TILES = [
   { key: "1-7", label: "1–7 days", color: "hsl(80 60% 45%)" },
-  { key: "8-14", label: "8–14 days", color: "hsl(50 90% 55%)" },
+  { key: "8-14", label: "8–14 days", color: "hsl(var(--status-warn))" },
   { key: "15-21", label: "15–21 days", color: "hsl(33 95% 55%)" },
-  { key: "over-21", label: "Over 21 days", color: "hsl(0 72% 50%)" },
+  { key: "over-21", label: "Over 21 days", color: "hsl(var(--status-critical))" },
 ];
 import CustomerBalancesFilters from "@/components/customer-balances/CustomerBalancesFilters";
 import { analyseInvoiceCredit } from "@/lib/creditAnalysis";

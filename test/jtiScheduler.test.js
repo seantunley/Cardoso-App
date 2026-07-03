@@ -23,12 +23,12 @@ beforeEach(() => {
   db = new Database(':memory:');
   db.exec(`
     CREATE TABLE jti_settings (
-      key TEXT PRIMARY KEY, value TEXT, updated_at TEXT DEFAULT (datetime('now'))
+      key TEXT PRIMARY KEY, value TEXT, updated_at TEXT DEFAULT ('2026-01-01 00:00:00')
     );
     CREATE TABLE jti_archive (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       period_year INTEGER NOT NULL, period_month INTEGER NOT NULL,
-      generated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      generated_at TEXT NOT NULL DEFAULT ('2026-01-01 00:00:00'),
       generated_by TEXT, source TEXT NOT NULL,
       filename TEXT NOT NULL, file_path TEXT NOT NULL,
       byte_size INTEGER NOT NULL, sha256 TEXT NOT NULL, row_count INTEGER NOT NULL,
@@ -183,6 +183,21 @@ describe('generateAndArchivePeriod', () => {
     // Now both rows live in the same period
     const rows = db.prepare(`SELECT source FROM jti_archive WHERE period_year = 2026 AND period_month = 4 ORDER BY id`).all();
     expect(rows.map(r => r.source)).toEqual(['manual', 'scheduled']);
+  });
+
+  it('coalesces two concurrent calls for the same period into ONE archive (no duplicate)', async () => {
+    // Without the per-period in-flight guard both async calls pass the
+    // hasScheduledArchive pre-check (neither has inserted yet) and each writes a
+    // 'scheduled' row → duplicate archive + double hub push. The guard hands the
+    // second caller the first's in-flight run, so only one archive is produced.
+    const pool = makeSagePool({ recordset: [sageRow] });
+    const [r1, r2] = await Promise.all([
+      generateAndArchivePeriod({ db, getSagePool: pool, year: 2026, month: 4 }),
+      generateAndArchivePeriod({ db, getSagePool: pool, year: 2026, month: 4 }),
+    ]);
+    expect(r1).toBe(r2); // same coalesced result object
+    expect(r1.status).toBe('archived');
+    expect(db.prepare('SELECT COUNT(*) AS n FROM jti_archive WHERE period_year = 2026 AND period_month = 4').get().n).toBe(1);
   });
 
   it('uses the right Date range for the period (1st .. last day inclusive)', async () => {

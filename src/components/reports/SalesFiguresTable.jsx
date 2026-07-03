@@ -9,8 +9,8 @@ import { fmtR } from './lib';
 // serves both reports.
 
 const TYPES = [
-  { key: 'invoices', label: 'Invoices', accent: 'hsl(145 55% 45%)' },
-  { key: 'credit_notes', label: 'Credit Notes', accent: 'hsl(0 72% 50%)' },
+  { key: 'invoices', label: 'Invoices', accent: 'hsl(var(--status-ok))' },
+  { key: 'credit_notes', label: 'Credit Notes', accent: 'hsl(var(--status-critical))' },
   { key: 'debit_notes', label: 'Debit Notes', accent: 'hsl(33 95% 55%)' },
 ];
 
