@@ -74,9 +74,15 @@ try {
   # hours to diagnose once. Check the connection first and, if it's missing,
   # log the REAL cause + the fix instead of a cryptic exit code.
   $whoAmI = $env:USERNAME
-  $repoStatus = & $KopiaExe repository status 2>&1
+  # Redirect kopia's stderr to a FILE, never 2>&1. Under $ErrorActionPreference
+  # = 'Stop' (set above), 2>&1 turns a native exe's stderr — including kopia's
+  # normal progress output — into a TERMINATING error that aborts the run on its
+  # very first line. A file redirect captures the message without tripping it.
+  $statusErrFile = Join-Path $logDir 'kopia-status.err'
+  & $KopiaExe repository status > $null 2> $statusErrFile
   if ($LASTEXITCODE -ne 0) {
-    Write-Log ("snapshot FAILED: this account ('$whoAmI') is NOT connected to the hub Kopia repository. kopia said: " + (($repoStatus | Out-String).Trim()))
+    $repoStatus = if (Test-Path $statusErrFile) { (Get-Content $statusErrFile -Raw).Trim() } else { '' }
+    Write-Log ("snapshot FAILED: this account ('$whoAmI') is NOT connected to the hub Kopia repository. kopia said: $repoStatus")
     Write-Log ("FIX: the repo connection is cached per-Windows-user, and this scheduled task runs as '$whoAmI'. Re-run kopia-agent-setup.ps1 AS THAT ACCOUNT (SYSTEM by default) so the connection is created in its profile - see docs/kopia-backups.md. A connection made in your interactive admin login is NOT visible to the task.")
     exit 1
   }
@@ -85,11 +91,15 @@ try {
   Write-Log "snapshot start -> $AppDir"
   # Quote the source — the path contains a space. The repo connection was
   # established once by kopia-agent-setup.ps1 and is cached in this account's
-  # kopia config, so no password is needed here. Capture stderr (2>&1) so a
-  # failure logs kopia's actual message, not just the exit code.
-  $createOut = & $KopiaExe snapshot create "$AppDir" 2>&1
+  # kopia config, so no password is needed here. Capture stderr to a FILE, NOT
+  # 2>&1: under $ErrorActionPreference='Stop', 2>&1 makes kopia's stderr
+  # progress a terminating error that kills the snapshot on its first line
+  # (manual `kopia snapshot create` works; the script-wrapped one didn't).
+  $createErrFile = Join-Path $logDir 'kopia-create.err'
+  & $KopiaExe snapshot create "$AppDir" 2> $createErrFile
   if ($LASTEXITCODE -ne 0) {
-    Write-Log ("snapshot create failed (exit $LASTEXITCODE). kopia said: " + (($createOut | Out-String).Trim()))
+    $createOut = if (Test-Path $createErrFile) { (Get-Content $createErrFile -Raw).Trim() } else { '' }
+    Write-Log ("snapshot create failed (exit $LASTEXITCODE). kopia said: $createOut")
     throw "kopia snapshot create exited $LASTEXITCODE"
   }
   Write-Log "snapshot OK"
