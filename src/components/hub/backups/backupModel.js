@@ -75,12 +75,19 @@ export function normalizeSites({ backupStatus, hubBackupMap = {}, kopiaMap = {},
     const hub = hubBackupMap[id] || null;
     const kopia = kopiaMap[id] || null;
 
+    // A fresh backup that simply hasn't been integrity-verified yet comes back as
+    // the site's 'warn' health with reason 'unverified'. Label it distinctly so
+    // it shows "Unverified" rather than "Overdue" (which wrongly implies age).
     const local = {
-      status: site.status || "unknown",
+      status: site.status === "warning" && site.health?.reason === "unverified" ? "unverified" : (site.status || "unknown"),
       lastAt: site.last_backup?.mtime || null,
       size: site.last_backup?.size ?? null,
       count: site.last_backup?.total_backups ?? null,
       dbSize: site.db_size ?? null,
+      // When the site last passed an integrity check, so the UI can show
+      // whether the 03:30 verify is actually running vs. quietly stopped.
+      verifiedAt: site.health?.verify?.at || null,
+      verifyStatus: site.health?.verify?.status || null,
     };
 
     // Hub copy: a copy existing isn't enough — a hub pull that stopped days ago
@@ -121,11 +128,17 @@ export function normalizeSites({ backupStatus, hubBackupMap = {}, kopiaMap = {},
       bytes: kopia?.total_bytes ?? null,
     };
 
-    // Overall rollup: local + hub always; off-site only when the feature is on;
-    // SQL only when it's actually configured (status !== 'unavailable') so a
-    // site with NO SQL Server isn't dragged down, but a CONFIGURED SQL backup
-    // that's failed/stale DOES surface in the health + sort (Codex #514 P2).
-    const rollup = [local.status, hubLayer.status];
+    // Overall rollup reflects the SITE's own protection: local backup + off-site
+    // (when enabled) + a CONFIGURED SQL backup (status !== 'unavailable', so a
+    // site with no SQL Server isn't dragged down but a failed/stale one is).
+    //
+    // The HUB COPY is deliberately EXCLUDED. A stale hub copy means the hub's
+    // PULL job is behind — not that the site failed. Rolling it in turned a site
+    // with an 11-minute-old local backup into "Problem" purely because the hub
+    // hadn't collected it, and reddened the whole fleet during a pull outage.
+    // Hub-copy age is still shown on its own layer; a hub-wide pull gap is a
+    // hub-level signal, not per-site health.
+    const rollup = [local.status];
     if (kopiaEnabled) rollup.push(offsite.status);
     if (sql.status !== "unavailable") rollup.push(sql.status);
     const overallTone = site.error ? "critical" : worstTone(rollup);

@@ -44,6 +44,7 @@ const STATUS_TONE = {
   ok: "ok",
   warning: "warn",
   overdue: "warn",
+  unverified: "warn",
   stale: "critical",
   never: "critical",
   error: "critical",

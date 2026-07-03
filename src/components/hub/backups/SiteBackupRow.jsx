@@ -125,6 +125,7 @@ export default function SiteBackupRow({
             name="Local (on site)" status={m.local.status} statusLabel={statusText(m.local.status)}
             lastAt={m.local.lastAt} size={m.local.size} count={m.local.count}
             extra={m.local.dbSize != null ? `live DB ${fmtBytes(m.local.dbSize)}` : null}
+            sub={`Integrity check: ${m.local.verifiedAt ? fmtRelative(m.local.verifiedAt) : "never"}${m.local.verifyStatus && m.local.verifyStatus !== "succeeded" ? ` (${m.local.verifyStatus})` : ""}`}
           >
             <Button size="sm" variant="outline" disabled={!m.url || busyDb} onClick={() => onPullDb(m.raw)} className="h-7 px-3 text-xs">
               <Download className="mr-1.5 h-3 w-3" />{busyDb ? "Pulling…" : "Pull DB"}
@@ -194,7 +195,7 @@ export default function SiteBackupRow({
 
 function statusText(s) {
   const map = {
-    ok: "OK", warning: "Overdue", stale: "Stale", never: "None", error: "Error",
+    ok: "OK", warning: "Overdue", unverified: "Unverified", stale: "Stale", never: "None", error: "Error",
     unreachable: "Offline", failed: "Failed", unavailable: "N/A", corrupt: "Corrupt", unknown: "Unknown",
   };
   return map[s] || s;
