@@ -3,26 +3,20 @@
 // dashboard/Operations panel uses (Sage connectivity, stale syncs, 24h errors,
 // job failures, active alerts). Shows a dot when the overall status isn't OK;
 // the dropdown lists the issues and links to Operations.
-import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Bell } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
   DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
-import { apiGet } from "@/components/collections/utils";
+import { useSageHealth } from "@/lib/useSageHealth";
 
 export default function NotificationsBell({ collapsed }) {
   const navigate = useNavigate();
-  // Same key + fetcher as SageHealthPanel so they share one cache entry and
-  // one request/min. On error, data is undefined → the bell simply shows no
-  // issues (the panel surfaces the error).
-  const { data } = useQuery({
-    queryKey: ["sage-health"],
-    queryFn: () => apiGet("/api/system/sage-health"),
-    staleTime: 30_000,
-    refetchInterval: 60_000,
-  });
+  // Shared health poll — one cache entry with SageHealthPanel + HealthStrip.
+  // On error, data is undefined → the bell simply shows no issues (the
+  // Operations panel surfaces the error).
+  const { data } = useSageHealth();
 
   const issues = [];
   if (data) {
