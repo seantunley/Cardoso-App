@@ -1625,6 +1625,125 @@ const RELEASES = {
   ],
   },
 
+  '2026-07-03': {
+    product: 'Cardoso App',
+    title: 'Product Update',
+    date: '3 July 2026',
+    slug: '03-July-2026',
+    intro:
+      "This update (v2026.5.11) delivers a major upgrade to the Hub Backups page — " +
+      "now a scannable fleet table with off-site Kopia restore built in — plus a new " +
+      "sidebar health strip for at-a-glance subsystem status, richer Ctrl+K command " +
+      "palette actions, and filtering and export tools on two log screens. A set of " +
+      "reliability fixes tighten local backup pruning, improve Kopia connectivity " +
+      "diagnostics, harden monthly export stability, and correct Hub copy status " +
+      "accuracy so nothing is shown as healthy when it shouldn't be.",
+    sections: [
+      {
+        label: 'NEW',
+        heading: 'New Features',
+        items: [
+          {
+            title: 'Hub Backups redesigned as a fleet table with off-site restore',
+            body:
+              "The Hub Backups page has been completely redesigned as a scannable " +
+              "fleet table. Every site's local, SQL Server, and off-site Kopia backup " +
+              "states are now first-class columns on a single screen — no need to " +
+              "click into each site separately. Head-office users can also browse " +
+              "the off-site Kopia snapshot repository directly in the app (with a " +
+              "link to the Kopia UI for deeper detail), and initiate a restore " +
+              "without leaving Cardoso: stage a snapshot, download it, and push it " +
+              "to the live site in one flow.",
+          },
+          {
+            title: 'Sidebar health strip',
+            body:
+              "A compact health strip now appears in the sidebar, showing the status " +
+              "of key subsystems — such as backup and data sync — at a glance. " +
+              "Named subsystem outcomes are displayed in a 2×2 grid so you can see " +
+              "at a glance whether everything is healthy without navigating away from " +
+              "your current page.",
+          },
+          {
+            title: 'Command palette — actions and settings deep-links',
+            body:
+              "The Ctrl+K command palette has been extended beyond page navigation. " +
+              "It now supports direct actions and can deep-link into specific settings " +
+              "tabs, reducing the steps needed to reach configuration screens. Quick " +
+              "entity search is also wired in so you can jump to a specific record " +
+              "directly from the palette.",
+          },
+          {
+            title: 'Log screens — filter, column picker, and CSV export',
+            body:
+              "Two log screens now include a DataTable toolbar with a live search " +
+              "filter, a column visibility picker to show only the fields you need, " +
+              "and a one-click CSV export of the current view.",
+          },
+        ],
+      },
+      {
+        label: 'IMPROVED',
+        heading: 'Improvements',
+        items: [
+          {
+            title: 'Hub copy status stays accurate while data loads',
+            body:
+              "The hub-copy backup status no longer shows 'never synced' while the " +
+              "underlying query is still resolving. A stalled hub copy is also now " +
+              "aged correctly — it no longer shows as green (healthy) when the last " +
+              "successful pull is overdue.",
+          },
+          {
+            title: 'Inventory data loads without freezing the app',
+            body:
+              "The sales-rollup rebuild — which runs during inventory syncs — is now " +
+              "broken into smaller yielding steps. Large datasets no longer cause the " +
+              "application to pause or become unresponsive, and concurrent warm-up " +
+              "requests are handled cleanly without duplicated work.",
+          },
+        ],
+      },
+      {
+        label: 'FIXED',
+        heading: 'Fixes',
+        items: [
+          {
+            title: 'Local backup pruning now actually runs — keeps 3 days, never zeros out',
+            body:
+              "A bug was preventing the local backup prune from executing at all, " +
+              "which could allow old backup files to accumulate indefinitely. Pruning " +
+              "now runs correctly, retaining the most recent 3 days of backups and " +
+              "removing older ones. The prune summary is also returned correctly and " +
+              "filename matching has been tightened.",
+          },
+          {
+            title: 'Kopia backup agent reports the real connection error',
+            body:
+              "When the Kopia off-site backup agent fails to connect to the " +
+              "repository, it now logs the actual reason rather than a generic exit " +
+              "code, making connectivity problems much easier to diagnose.",
+          },
+          {
+            title: 'Monthly export is freeze-proof and alerts when a period is missing',
+            body:
+              "The automated monthly export process is now protected against freezes " +
+              "during generation, and exports are serialised per period to prevent " +
+              "conflicts. An alert is raised automatically if a month's export is " +
+              "found to be missing, so nothing slips through unnoticed.",
+          },
+          {
+            title: 'Hub Backups blocks restore from incomplete snapshots',
+            body:
+              "The Hub Backups page now prevents initiating a Kopia restore from " +
+              "an incomplete snapshot. Only fully verified snapshots are offered for " +
+              "restore, eliminating the risk of pushing partial data to a live site.",
+          },
+        ],
+      },
+    ],
+  },
+
   '2026-05-28': {
     product: 'Cardoso App',
     title: 'Product Update',
