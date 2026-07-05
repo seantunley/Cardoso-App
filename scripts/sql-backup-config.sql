@@ -37,10 +37,13 @@ GO
 USE msdb;
 
 -- Guard: the DatabaseBackup procedure must exist (Ola installed) or the jobs
--- would run but fail every night. Fail loudly now instead.
+-- would run but fail every night. Fail loudly now instead. Names the connected
+-- instance so a wrong-instance connection (the common cause on named/remote Sage
+-- instances) is obvious rather than a bare "not installed".
 IF OBJECT_ID('master.dbo.DatabaseBackup') IS NULL
 BEGIN
-  RAISERROR('Ola Hallengren''s DatabaseBackup procedure is not installed in master. Run docs/sql-backup-setup.md step 2 first.', 16, 1);
+  DECLARE @guardMsg nvarchar(600) = N'Ola Hallengren''s DatabaseBackup procedure is not installed in master on THIS instance (' + @@SERVERNAME + N'). Either run docs/sql-backup-setup.md step 2, or you are connected to the WRONG instance — connect SSMS to this site''s Sage instance (host\instance, not localhost).';
+  RAISERROR(@guardMsg, 16, 1);
   RETURN;
 END
 

@@ -41,10 +41,22 @@ backup. Ola Hallengren makes the SQL backups; Kopia does the copy + dedup + GFS.
 **Prerequisite:** the site's **Kopia agent is already set up** (its off-site tile
 is green on the Hub Backups page). If not, do that first (`docs/kopia-backups.md`).
 
-**Per-site variables:** the site **slug**, and its **Saturday slot** (the full's
-`@fullTime` in the SQL script + the matching Kopia snapshot time — see the table
-above). DB names and paths are the same across the estate — confirm the DB names
-per site if any differ.
+**Per-site variables:** the site **slug**, its **Saturday slot** (the full's
+`@fullTime` + matching Kopia snapshot time, table above), and the **Sage SQL
+instance**. The Sage instance is often a *named* instance (e.g.
+`CARDOSOCISERVER\SQLEXPRESS`), **not** the default `localhost` — get the exact
+`host\instance` from the site's Sage connection (Settings → Connections, or
+`docs/operator-runbook.md`) and use it in steps 1–3. Installing into the wrong
+instance is the usual cause of step 3 aborting with *"DatabaseBackup not
+installed"*. DB names and paths are otherwise the same across the estate —
+confirm the DB names per site if any differ.
+
+> **Remote Sage box?** If the Sage SQL Server runs on a *different machine* from
+> the Cardoso app, its `.bak` folder lands on that machine, which the Kopia agent
+> (on the app box) doesn't snapshot. Then either back up to a UNC share on the app
+> box (grant the SQL service account write to it and use that path below), or run
+> a Kopia agent on the SQL box. The common case is a **local named instance**
+> (same box), where the paths below work as-is.
 
 ---
 
@@ -56,8 +68,12 @@ or the backup silently fails.
 ```powershell
 $d = "C:\Cardoso Customer App\database\sql-backups"
 New-Item -ItemType Directory $d -Force | Out-Null
-icacls $d /grant "NT SERVICE\MSSQLSERVER:(OI)(CI)M"
-# If SQL runs under a named/domain service account, grant THAT account instead.
+# The SQL service account depends on the instance:
+#   default instance (MSSQLSERVER) → 'NT SERVICE\MSSQLSERVER'
+#   named instance <NAME>          → 'NT SERVICE\MSSQL$<NAME>'  e.g. MSSQL$SQLEXPRESS
+#   a named/domain service account → grant THAT account instead.
+# (single quotes so PowerShell doesn't treat $<NAME> as a variable)
+icacls $d /grant 'NT SERVICE\MSSQL$SQLEXPRESS:(OI)(CI)M'   # ← match THIS site's instance
 ```
 
 ### 2. Install Ola Hallengren's backup **procedures** (PowerShell, via dbatools)
@@ -65,20 +81,27 @@ Procedures only — **no `-InstallJobs`**. Current dbatools rejects `-InstallJob
 with any `-Solution` other than `All` (*"Jobs can only be created for all
 solutions"*), and we don't want the IndexOptimize/IntegrityCheck jobs anyway —
 `scripts/sql-backup-config.sql` creates exactly the two backup jobs we need.
+**Install into THIS site's Sage instance** (`-SqlInstance`), not `localhost` —
+otherwise Ola lands in the wrong instance and step 3 aborts.
 ```powershell
 Install-Module dbatools -Scope AllUsers -Force        # once per box; needs internet
-Install-DbaMaintenanceSolution -SqlInstance localhost `
+$SqlInstance = "CARDOSOCISERVER\SQLEXPRESS"            # ← this site's Sage instance (or 'localhost')
+Install-DbaMaintenanceSolution -SqlInstance $SqlInstance `
   -Database master `
   -BackupLocation "C:\Cardoso Customer App\database\sql-backups" `
   -CleanupTime 220 `
   -Solution Backup
 ```
-This installs the `DatabaseBackup` procedure + `CommandLog` table in `master`.
-(Offline box: download `MaintenanceSolution.sql` from https://ola.hallengren.com,
-set `@CreateJobs='N'` and run it against `master` in SSMS.)
+This installs the `DatabaseBackup` procedure + `CommandLog` table in `master` **on
+that instance**. (Offline box: download `MaintenanceSolution.sql` from
+https://ola.hallengren.com, set `@CreateJobs='N'`, and run it against `master` on
+the **Sage instance** in SSMS.)
 
 ### 3. Recovery models + backup jobs (SSMS)
-Open `scripts/sql-backup-config.sql`, **set `@fullTime` to this site's Saturday
+**Connect SSMS to the same Sage instance** as step 2 (`host\instance`, not
+`localhost`) — the script's first guard checks Ola's `DatabaseBackup` proc exists
+*on the connected instance*, so a wrong connection is what makes it abort. Then
+open `scripts/sql-backup-config.sql`, **set `@fullTime` to this site's Saturday
 slot** (the table above — e.g. Ermelo `040000`), **confirm the DB names**, run it
 (F5). It sets all three DBs to SIMPLE and **creates + configures** the two Agent
 jobs — **FULL Saturday @fullTime** + **DIFF Mon–Fri 01:00** with 9-day local
