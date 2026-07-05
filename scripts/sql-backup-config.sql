@@ -131,18 +131,24 @@ END
 CLOSE cleanup; DEALLOCATE cleanup;
 
 /* FULL → Saturday @fullTime (freq_type 8 = weekly, freq_interval 64 = Saturday).
-   sp_update_schedule keeps the per-site time current when the script is re-run
-   with a different @fullTime. */
+   On re-run, sp_update_schedule re-applies the FULL definition (not just the
+   time) so a schedule left over from an earlier version converges instead of
+   keeping stale attributes. */
 IF NOT EXISTS (SELECT 1 FROM dbo.sysschedules WHERE name = N'Cardoso-Full-Sat')
   EXEC dbo.sp_add_schedule @schedule_name = N'Cardoso-Full-Sat', @freq_type = 8, @freq_interval = 64, @freq_recurrence_factor = 1, @active_start_time = @fullTime;
 ELSE
-  EXEC dbo.sp_update_schedule @name = N'Cardoso-Full-Sat', @active_start_time = @fullTime;
+  EXEC dbo.sp_update_schedule @name = N'Cardoso-Full-Sat', @freq_type = 8, @freq_interval = 64, @freq_recurrence_factor = 1, @active_start_time = @fullTime;
 IF NOT EXISTS (SELECT 1 FROM dbo.sysjobschedules js JOIN dbo.sysschedules s ON js.schedule_id = s.schedule_id JOIN dbo.sysjobs j ON js.job_id = j.job_id WHERE j.name = @full AND s.name = N'Cardoso-Full-Sat')
   EXEC dbo.sp_attach_schedule @job_name = @full, @schedule_name = N'Cardoso-Full-Sat';
 
-/* DIFF → Mon–Fri 01:00 (freq_interval 62 = Mon..Fri bitmask). */
+/* DIFF → Mon–Fri 01:00 (freq_interval 62 = Mon..Fri bitmask). Same as FULL:
+   re-apply the definition on re-run, or a pre-existing 'Cardoso-Diff-MonFri' with
+   an earlier freq_interval (e.g. 63 = Sun–Fri) would keep its Sunday DIFF and the
+   overlap-with-the-Saturday-full risk this schedule was changed to remove. */
 IF NOT EXISTS (SELECT 1 FROM dbo.sysschedules WHERE name = N'Cardoso-Diff-MonFri')
   EXEC dbo.sp_add_schedule @schedule_name = N'Cardoso-Diff-MonFri', @freq_type = 8, @freq_interval = 62, @freq_recurrence_factor = 1, @active_start_time = 010000;
+ELSE
+  EXEC dbo.sp_update_schedule @name = N'Cardoso-Diff-MonFri', @freq_type = 8, @freq_interval = 62, @freq_recurrence_factor = 1, @active_start_time = 010000;
 IF NOT EXISTS (SELECT 1 FROM dbo.sysjobschedules js JOIN dbo.sysschedules s ON js.schedule_id = s.schedule_id JOIN dbo.sysjobs j ON js.job_id = j.job_id WHERE j.name = @diff AND s.name = N'Cardoso-Diff-MonFri')
   EXEC dbo.sp_attach_schedule @job_name = @diff, @schedule_name = N'Cardoso-Diff-MonFri';
 
