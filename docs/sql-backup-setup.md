@@ -9,16 +9,28 @@ backup. Ola Hallengren makes the SQL backups; Kopia does the copy + dedup + GFS.
 - The company DB is ~134 GB → the compressed `.bak` is ~10 GB, and it can't be
   stored uncompressed on the box. So **backup compression stays on.**
 - Compressed fulls **dedup poorly** in Kopia, so a nightly *full* would push
-  ~10 GB off-site every night. Instead: **weekly FULL (Saturday 22:00) + nightly
-  DIFF (Mon–Sat 01:00).** The diff is only what changed since the full — small —
-  so the nightly off-site upload is small; the 10 GB full moves once a week.
-- **Timing matters:** the Kopia agent snapshots the app folder at **02:30**. Every
-  SQL job must *finish* before then, or Kopia can capture a `.bak` mid-write. The
-  DIFF (01:00, small) finishes in minutes; the big FULL runs **Saturday 22:00** so
-  it has ~4.5 h of headroom before the Sunday 02:30 snapshot. **Sunday has no DIFF
-  on purpose** — a Sunday 01:00 diff would sit only ~3 h after the Saturday full
-  and could overlap it; Sunday's off-site point is the fresh Saturday full, and
-  Monday's diff picks up Sunday's changes.
+  ~10 GB off-site every night. Instead: **weekly FULL (Saturday) + DIFF (Mon–Fri
+  01:00).** The diff is only what changed that day — small — so the nightly
+  off-site upload is small; the 10 GB full moves once a week. No weekend diffs:
+  staff don't work weekends, so nothing changes Sat/Sun.
+- **The fulls are staggered so they don't crush the hub uplink.** The ~10 GB full
+  uploads to the hub when Kopia snapshots, and every site pushes to the *same* hub
+  line. If all sites did their full at once, the line would saturate. So each site
+  does its full **Saturday in its own 3-hour slot**, and its **Kopia snapshot runs
+  ~1.5 h after** — only one site pushes a full at a time. Saturday works because
+  no one's working, so the daytime slots are free.
+
+  | Slot | Site | SQL full (Sat) | Kopia snapshot |
+  |---|---|---|---|
+  | 1 | Pretoria | 01:00 | 02:30 |
+  | 2 | Ermelo | 04:00 | 05:30 |
+  | 3 | Johannesburg | 07:00 | 08:30 |
+  | 4 | Klerksdorp | 10:00 | 11:30 |
+  | 5 | Polokwane | 13:00 | 14:30 |
+  | 6 | Welkom | 16:00 | 17:30 |
+
+  The daily **diffs** are tiny (Kopia dedups them), so they don't need staggering —
+  they all run 01:00 and the snapshot carries them at the site's usual time.
 - The `.bak`s land in `C:\Cardoso Customer App\database\sql-backups`, which is
   **inside the folder the Kopia agent snapshots** and **not** in `.kopiaignore`,
   so they ride off-site automatically. Kopia dedups + GFS-retains from the hub;
@@ -29,8 +41,10 @@ backup. Ola Hallengren makes the SQL backups; Kopia does the copy + dedup + GFS.
 **Prerequisite:** the site's **Kopia agent is already set up** (its off-site tile
 is green on the Hub Backups page). If not, do that first (`docs/kopia-backups.md`).
 
-**Per-site variable:** only the site **slug** changes. The DB names and paths are
-the same across the estate — confirm the DB names per site if any differ.
+**Per-site variables:** the site **slug**, and its **Saturday slot** (the full's
+`@fullTime` in the SQL script + the matching Kopia snapshot time — see the table
+above). DB names and paths are the same across the estate — confirm the DB names
+per site if any differ.
 
 ---
 
@@ -64,19 +78,28 @@ This installs the `DatabaseBackup` procedure + `CommandLog` table in `master`.
 set `@CreateJobs='N'` and run it against `master` in SSMS.)
 
 ### 3. Recovery models + backup jobs (SSMS)
-Open `scripts/sql-backup-config.sql`, **confirm the DB names**, run it (F5).
-It sets all three DBs to SIMPLE and **creates + configures** the two Agent jobs —
-**FULL weekly (Sat 22:00)** + **DIFF nightly (Mon–Sat 01:00)** with 9-day local
-retention, timed to finish before the 02:30 Kopia snapshot. (It's the script —
-not dbatools — that creates the jobs, so it's fine that step 2 installed
-procedures only. Re-runnable.)
+Open `scripts/sql-backup-config.sql`, **set `@fullTime` to this site's Saturday
+slot** (the table above — e.g. Ermelo `040000`), **confirm the DB names**, run it
+(F5). It sets all three DBs to SIMPLE and **creates + configures** the two Agent
+jobs — **FULL Saturday @fullTime** + **DIFF Mon–Fri 01:00** with 9-day local
+retention. (It's the script — not dbatools — that creates the jobs, so it's fine
+that step 2 installed procedures only. Re-runnable — changing `@fullTime` and
+re-running re-times the full.)
 
 If CARSYS (or any DB) was in FULL recovery its log may be bloated — reclaim it:
 ```sql
 USE CARSYS; DBCC SHRINKFILE (2, 200);   -- file 2 is the log on a standard DB
 ```
 
-### 4. Kopia GFS retention (PowerShell — set the slug)
+### 4. Kopia: staggered snapshot time + GFS retention (PowerShell, admin)
+**a) Move this site's snapshot to its slot** (~1.5 h after the full — the table
+above), so only one site pushes its full up the hub line at a time:
+```powershell
+Set-ScheduledTask -TaskName 'CardosoKopiaAgent' `
+  -Trigger (New-ScheduledTaskTrigger -Daily -At '05:30')   # ← this site's push time
+```
+
+**b) GFS retention.**
 > ⚠ **Run kopia as the account the agent uses.** The repository connection is
 > cached **per Windows user**, and the `CardosoKopiaAgent` task runs as **SYSTEM**
 > (see `scripts/kopia-agent-setup.ps1`). An interactive admin shell is *not*
@@ -118,5 +141,5 @@ chain automatically from the backup folder, or restore manually: full first
   snapshots (Hub → View snapshots). With diffs it should be small.
 - Local disk tight? Lower `@CleanupTime` — but keep it **> 7 days** so the weekly
   full survives for the diff chain.
-- Bigger daily churn than expected? The diff grows through the week and resets
-  each Sunday full — that's normal.
+- Bigger daily churn than expected? The diff grows through the work week and
+  resets at the **Saturday** full — that's normal.
