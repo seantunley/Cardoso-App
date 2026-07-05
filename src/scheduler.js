@@ -5,7 +5,6 @@ import { Worker } from 'worker_threads';
 import { fileURLToPath } from 'url';
 import db, { dbPath } from './db/index.js';
 import { runConnectionImport } from './services/syncEngine.js';
-// networkDevices service removed (replaced by ntopng integration)
 import { syncCreditLogicFromHub, probeHubUrl } from './services/creditLogic.js';
 import { logError } from './lib/errorLog.js';
 import { refreshSageWeekTotalsCache, probeSageHealth } from './services/batReconciliation.js';
@@ -827,8 +826,6 @@ export function startSchedulers() {
         description: 'Nightly BAT reconciliation integrity sweep — writes bat.integrity.drift per failing recon',
       });
     }
-
-    // ntopng integration: no local scheduled scan needed (ntopng pulls flows continuously)
 
     // Boot-time hub-URL probe. Hits ${HUB_URL}/api/health once a few seconds
     // after startup and logs LOUD if it fails. The first credit-logic-sync

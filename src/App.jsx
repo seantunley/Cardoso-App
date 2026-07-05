@@ -28,7 +28,6 @@ const pagePermissions = {
   Inventory: "can_access_inventory",
   InventoryMovement: "can_access_inventory_movement",
   PriceList: "can_access_price_list",
-  NetworkDevices: "can_access_network_devices",
   HubMetrics: "can_access_hub_metrics",
   HubBackups: "can_access_hub_backups",
   HubTrends: "can_access_hub_trends",

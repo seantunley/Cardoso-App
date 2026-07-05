@@ -20,7 +20,7 @@ export function hasPermission(user, permissionKey) {
     // INTEGER (0/1); the admin migration sets every existing admin's
     // permissions to 1 so this check only fires when an operator
     // intentionally toggles a module off for a specific admin (e.g. a
-    // BAT-only admin who shouldn't see Network Devices).
+    // BAT-only admin who shouldn't see Creditors).
     if (user[permissionKey] === 0 || user[permissionKey] === false) {
       return false;
     }

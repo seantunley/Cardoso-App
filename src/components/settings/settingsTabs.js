@@ -75,7 +75,6 @@ export function buildSettingsTabGroups({ currentUser, hubMode }) {
         !hubMode && isAdmin && { id: "maintenance", label: "Maintenance" },
         !hubMode && isAdmin && { id: "dr", label: "Disaster Recovery" },
         hubMode && isAdmin && { id: "hubmaintenance", label: "Hub Maintenance" },
-        hubMode && isAdmin && { id: "network", label: "Network" },
         isAdmin && { id: "tls", label: "TLS" },
       ],
     },

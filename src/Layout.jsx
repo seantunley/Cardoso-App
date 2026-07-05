@@ -95,25 +95,6 @@ const IconStockExpiry = ({ className, style }) => (
   </svg>
 );
 
-// Network Devices — stacked server racks with status LEDs + signal bars.
-const IconNetworkDevices = ({ className, style }) => (
-  <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
-    {/* Back rack */}
-    <rect x="3.5" y="3" width="13" height="5" rx="1" fill="#22d3ee" opacity="0.35"/>
-    {/* Front rack */}
-    <rect x="2.5" y="6.5" width="13" height="5" rx="1" fill="#06b6d4"/>
-    <rect x="2.5" y="6.5" width="13" height="0.7" fill="#67e8f9" opacity="0.7"/>
-    {/* LEDs */}
-    <circle cx="13.5" cy="9" r="0.6" fill="#22c55e"/>
-    <circle cx="11.5" cy="9" r="0.6" fill="#fbbf24"/>
-    {/* Signal bars rising bottom-right */}
-    <rect x="8"  y="15"   width="1.5" height="2"   rx="0.2" fill="#a78bfa"/>
-    <rect x="10" y="13.5" width="1.5" height="3.5" rx="0.2" fill="#a78bfa"/>
-    <rect x="12" y="12"   width="1.5" height="5"   rx="0.2" fill="#c4b5fd"/>
-    <rect x="14" y="10.5" width="1.5" height="6.5" rx="0.2" fill="#c4b5fd"/>
-  </svg>
-);
-
 // Collections — phone receiver with a phosphor pulse signal beside it.
 const IconCollections = ({ className, style }) => (
   <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
@@ -411,7 +392,6 @@ const navItems = [
   // siteOnly — its detail drawer needs AP payment/PO data the ETL does not
   // carry yet.
   { name: "Creditor Balances",   icon: IconCreditors,             page: "CreditorSummary",  permission: "can_access_creditors", group: "Creditors" },
-  { name: "Network Devices",     icon: IconNetworkDevices,        page: "NetworkDevices",   permission: "can_access_network_devices", group: "System" },
   { name: "Credit Debug",        icon: IconCreditDebug,           page: "CreditDebug",      adminOnly: true, siteOnly: true, group: "System" },
   // Operations — admin-only home for background job runs, system errors,
   // deploys, and (in hub mode) per-site sync log. Same admin gating as

@@ -26,7 +26,6 @@ export interface User {
   can_access_collections?: 0 | 1 | boolean;
   can_access_reports?: 0 | 1 | boolean;
   can_access_jti?: 0 | 1 | boolean;
-  can_access_network_devices?: 0 | 1 | boolean;
   can_access_operations?: 0 | 1 | boolean;
   can_access_audit?: 0 | 1 | boolean;
   // Allow forward-compat for permissions added after this file was written.

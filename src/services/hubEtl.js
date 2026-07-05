@@ -15,7 +15,6 @@ import { logError } from '../lib/errorLog.js';
 import { trackOp } from '../lib/mainThreadWatch.js';
 import { describeFetchError } from '../lib/errorDescribe.js';
 import { siteBackupDirName, reconcileHubBackupDirs } from '../hub/siteBackupDir.js';
-// ntopng replaces the old PowerShell-based network device sync; no ETL pull needed.
 
 const { sqliteDb: db, repository: hubRepository } = getHubStorageRuntime();
 

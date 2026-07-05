@@ -74,7 +74,6 @@ const permissionTabs = [
     permissions: [
       { key: "can_access_settings", label: "Settings", description: "Access settings panel" },
       { key: "can_access_connections", label: "Connections", description: "Manage database connections" },
-      { key: "can_access_network_devices", label: "Network Devices", description: "View discovered network devices and bandwidth estimates" },
     ],
   },
   {
@@ -203,7 +202,7 @@ export default function UserPermissionsModal({ user, open, onClose, onSave, isSa
           {user?.role === "admin" && (
             <div className="mb-2 rounded-lg border border-amber-700/50 bg-amber-900/20 px-3 py-2">
               <p className="text-xs text-amber-400">
-                Admins have full access by default, but individual modules can be turned off here (e.g. a BAT-only admin who shouldn't see Network Devices).
+                Admins have full access by default, but individual modules can be turned off here (e.g. a BAT-only admin who shouldn't see Creditors).
               </p>
             </div>
           )}
