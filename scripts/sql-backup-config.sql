@@ -128,6 +128,8 @@ IF NOT EXISTS (SELECT 1 FROM dbo.sysschedules WHERE name = N'Cardoso-Diff-MonFri
   EXEC dbo.sp_add_schedule @schedule_name = N'Cardoso-Diff-MonFri', @freq_type = 8, @freq_interval = 62, @freq_recurrence_factor = 1, @active_start_time = 010000;
 IF NOT EXISTS (SELECT 1 FROM dbo.sysjobschedules js JOIN dbo.sysschedules s ON js.schedule_id = s.schedule_id JOIN dbo.sysjobs j ON js.job_id = j.job_id WHERE j.name = @diff AND s.name = N'Cardoso-Diff-MonFri')
   EXEC dbo.sp_attach_schedule @job_name = @diff, @schedule_name = N'Cardoso-Diff-MonFri';
-GO
 
+-- Success message stays INSIDE this batch (before the GO) so the guard's RETURN
+-- above skips it: a skipped/failed Ola install must NOT print "config applied".
 PRINT 'SQL backup config applied: CARDAT/CARSYS/PPDdata SIMPLE; FULL Saturday (per-site slot) + DIFF Mon-Fri 01:00, 9-day local retention. Set the Kopia snapshot ~1.5h after the full slot.';
+GO
