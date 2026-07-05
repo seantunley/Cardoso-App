@@ -25,21 +25,19 @@
 --
 -- ⚠ Confirm the database names below match THIS site before running.
 
+-- One batch (no GO before the jobs) so a failed preflight's RETURN aborts the
+-- WHOLE script — otherwise a later batch would still run. USE msdb is for the
+-- SQL Agent job procs; ALTER DATABASE below names its target DB, so running from
+-- msdb context is fine.
 SET NOCOUNT ON;
-
-/* ---- 1. Recovery models: all three SIMPLE ---- */
-IF DB_ID('CARSYS')  IS NOT NULL AND (SELECT recovery_model_desc FROM sys.databases WHERE name = 'CARSYS')  <> 'SIMPLE' ALTER DATABASE CARSYS  SET RECOVERY SIMPLE;
-IF DB_ID('CARDAT')  IS NOT NULL AND (SELECT recovery_model_desc FROM sys.databases WHERE name = 'CARDAT')  <> 'SIMPLE' ALTER DATABASE CARDAT  SET RECOVERY SIMPLE;
-IF DB_ID('PPDdata') IS NOT NULL AND (SELECT recovery_model_desc FROM sys.databases WHERE name = 'PPDdata') <> 'SIMPLE' ALTER DATABASE PPDdata SET RECOVERY SIMPLE;
-GO
-
-/* ---- 2. Backup jobs: create if missing, then (re)configure the command ---- */
 USE msdb;
 
--- Guard: the DatabaseBackup procedure must exist (Ola installed) or the jobs
--- would run but fail every night. Fail loudly now instead. Names the connected
--- instance so a wrong-instance connection (the common cause on named/remote Sage
--- instances) is obvious rather than a bare "not installed".
+/* ---- 1. Ola preflight — BEFORE any change ----
+   If DatabaseBackup isn't installed (step 2 skipped, or SSMS connected to the
+   WRONG instance), stop before touching anything — so a failed run can't flip
+   recovery models to SIMPLE (breaking an existing FULL log chain / point-in-time
+   recovery) and then abort with no replacement jobs. Names the connected instance
+   so a wrong-instance connection is obvious rather than a bare "not installed". */
 IF OBJECT_ID('master.dbo.DatabaseBackup') IS NULL
 BEGIN
   DECLARE @guardMsg nvarchar(600) = N'Ola Hallengren''s DatabaseBackup procedure is not installed in master on THIS instance (' + @@SERVERNAME + N'). Either run docs/sql-backup-setup.md step 2, or you are connected to the WRONG instance — connect SSMS to this site''s Sage instance (host\instance, not localhost).';
@@ -47,12 +45,16 @@ BEGIN
   RETURN;
 END
 
--- Edition preflight: SQL Server EXPRESS (EngineEdition 4) has NO SQL Server
--- Agent, so the Agent jobs below can't be created or run — leaving the site
--- silently unscheduled. Stop here (recovery models in section 1 already applied)
--- and direct the operator to the Windows Task Scheduler + sqlcmd path instead.
--- Note: edition is what matters, NOT the instance name — an instance NAMED
--- "SQLEXPRESS" that is actually Standard reports EngineEdition 2 and proceeds.
+/* ---- 2. Recovery models: all three SIMPLE (every edition) ---- */
+IF DB_ID('CARSYS')  IS NOT NULL AND (SELECT recovery_model_desc FROM sys.databases WHERE name = 'CARSYS')  <> 'SIMPLE' ALTER DATABASE CARSYS  SET RECOVERY SIMPLE;
+IF DB_ID('CARDAT')  IS NOT NULL AND (SELECT recovery_model_desc FROM sys.databases WHERE name = 'CARDAT')  <> 'SIMPLE' ALTER DATABASE CARDAT  SET RECOVERY SIMPLE;
+IF DB_ID('PPDdata') IS NOT NULL AND (SELECT recovery_model_desc FROM sys.databases WHERE name = 'PPDdata') <> 'SIMPLE' ALTER DATABASE PPDdata SET RECOVERY SIMPLE;
+
+/* ---- 3. Edition preflight: SQL Server EXPRESS (EngineEdition 4) has NO SQL
+   Server Agent, so the Agent jobs below can't be created or run. Recovery models
+   are set (above); stop and use the Windows Task Scheduler + sqlcmd path instead.
+   Edition, NOT instance name — an instance NAMED "SQLEXPRESS" that is really
+   Standard reports EngineEdition 2 and proceeds. */
 IF CAST(SERVERPROPERTY('EngineEdition') AS int) = 4
 BEGIN
   PRINT 'SQL Server EXPRESS detected (' + CAST(SERVERPROPERTY('Edition') AS nvarchar(200)) + ') on ' + @@SERVERNAME
@@ -60,6 +62,8 @@ BEGIN
     + ' Schedule the FULL/DIFF backups via Windows Task Scheduler + sqlcmd instead — see docs/sql-backup-setup.md step 3b.';
   RETURN;
 END
+
+/* ---- 4. Backup jobs: create if missing, then (re)configure ---- */
 
 /* ══════════════════════════════════════════════════════════════════════════
    ⚠ SET THIS PER SITE — the weekly FULL's Saturday start time (HHMMSS as int).

@@ -141,12 +141,13 @@ $diff = New-ScheduledTaskAction -Execute 'sqlcmd.exe' `
 Register-ScheduledTask -TaskName 'CardosoSqlBackupDiff' -Force -RunLevel Highest -User 'SYSTEM' `
   -Action $diff -Trigger (New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday,Tuesday,Wednesday,Thursday,Friday -At '01:00')
 ```
-> ⚠ The task runs as **SYSTEM**, which must be able to run backups on the instance
-> (sysadmin, or db_backupoperator on each DB). If it can't, `sqlcmd -E` fails to
-> connect — either run the task as the SQL service account, or in SSMS grant it:
-> `CREATE LOGIN [NT AUTHORITY\SYSTEM] FROM WINDOWS;` then add that login to a role
-> that can back up. Verify by running the FULL task once (step 5) and checking a
-> `.bak` appears.
+> ⚠ The task runs as **SYSTEM**, which must be a **sysadmin** on the instance.
+> Ola's `DatabaseBackup` requires sysadmin when run outside SQL Agent (see Ola's
+> [permissions FAQ](https://ola.hallengren.com/frequently-asked-questions.html#permissions))
+> — `db_backupoperator` is **not** enough and the tasks will fail. If SYSTEM isn't
+> sysadmin, either run the task as the SQL service account (which is), or in SSMS:
+> `CREATE LOGIN [NT AUTHORITY\SYSTEM] FROM WINDOWS; ALTER SERVER ROLE sysadmin ADD MEMBER [NT AUTHORITY\SYSTEM];`
+> Verify by running the FULL task once (step 5) and checking a `.bak` appears.
 
 If CARSYS (or any DB) was in FULL recovery its log may be bloated — reclaim it:
 ```sql
@@ -189,15 +190,29 @@ Start-ScheduledTask -TaskName 'CardosoKopiaAgent'
 `PsExec64.exe -s "C:\Cardoso Customer App\kopia\kopia.exe" snapshot create "C:\Cardoso Customer App"`.)
 
 On the hub → **Backups → the site → View snapshots**: the newest snapshot should
-be bigger (it swept up the `.bak`s), and the **SQL backups** panel should turn
-green. That confirms SQL is going off-site.
+be bigger (it swept up the `.bak`s), and the **SQL backups off-site** panel (top
+of that dialog) should list CARDAT/CARSYS/PPDdata and turn green.
+
+> This panel + the fleet-row SQL dot come from the off-site SQL-verify feature
+> (**PR #522**), which reads the `.bak` files *inside the Kopia snapshot* — not
+> the site-polled "SQL Server (DAT)" layer, which tracks SQLBackupAndFTP and stays
+> N/A for these Ola jobs. If #522 isn't deployed yet, verify instead by browsing
+> the snapshot tree (**View snapshots → Browse**) to `database/sql-backups` and
+> confirming today's `.bak` are there.
 
 ---
 
 ## Restore
-Latest **FULL** + latest **DIFF**. `Restore-DbaDatabase` (dbatools) resolves the
-chain automatically from the backup folder, or restore manually: full first
-(`WITH NORECOVERY`), then the diff (`WITH RECOVERY`).
+Use **`Restore-DbaDatabase`** (dbatools) pointed at the backup folder — it resolves
+the correct FULL + matching DIFF chain automatically, which is the safe path.
+
+Restoring by hand, mind the chain: a DIFF only applies on top of the FULL it was
+based on. With this schedule, between the Saturday FULL and the first weekday DIFF
+the newest DIFF in the folder still belongs to the *previous* week's full, so
+"latest full + latest diff" would be rejected (differential base ≠ chosen full).
+Restore the chosen **FULL** (`WITH NORECOVERY`), then the **latest DIFF whose base
+is that full** (`WITH RECOVERY`) — or the full **alone** (`WITH RECOVERY`) if no
+diff on that full exists yet.
 
 ## Tuning (after the first week)
 - **Nightly off-site cost** = the size difference between two consecutive Kopia
