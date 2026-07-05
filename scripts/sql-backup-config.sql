@@ -47,6 +47,20 @@ BEGIN
   RETURN;
 END
 
+-- Edition preflight: SQL Server EXPRESS (EngineEdition 4) has NO SQL Server
+-- Agent, so the Agent jobs below can't be created or run — leaving the site
+-- silently unscheduled. Stop here (recovery models in section 1 already applied)
+-- and direct the operator to the Windows Task Scheduler + sqlcmd path instead.
+-- Note: edition is what matters, NOT the instance name — an instance NAMED
+-- "SQLEXPRESS" that is actually Standard reports EngineEdition 2 and proceeds.
+IF CAST(SERVERPROPERTY('EngineEdition') AS int) = 4
+BEGIN
+  PRINT 'SQL Server EXPRESS detected (' + CAST(SERVERPROPERTY('Edition') AS nvarchar(200)) + ') on ' + @@SERVERNAME
+    + ' — no SQL Server Agent. Recovery models are set to SIMPLE, but NO Agent jobs were created.'
+    + ' Schedule the FULL/DIFF backups via Windows Task Scheduler + sqlcmd instead — see docs/sql-backup-setup.md step 3b.';
+  RETURN;
+END
+
 /* ══════════════════════════════════════════════════════════════════════════
    ⚠ SET THIS PER SITE — the weekly FULL's Saturday start time (HHMMSS as int).
    Every site's full runs SATURDAY but in its own 3-hour slot, so only one site

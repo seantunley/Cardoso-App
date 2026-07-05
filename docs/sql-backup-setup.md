@@ -97,17 +97,56 @@ that instance**. (Offline box: download `MaintenanceSolution.sql` from
 https://ola.hallengren.com, set `@CreateJobs='N'`, and run it against `master` on
 the **Sage instance** in SSMS.)
 
-### 3. Recovery models + backup jobs (SSMS)
+### 3. Recovery models + scheduling (SSMS)
 **Connect SSMS to the same Sage instance** as step 2 (`host\instance`, not
 `localhost`) — the script's first guard checks Ola's `DatabaseBackup` proc exists
-*on the connected instance*, so a wrong connection is what makes it abort. Then
-open `scripts/sql-backup-config.sql`, **set `@fullTime` to this site's Saturday
+*on the connected instance*, so a wrong connection is what makes it abort.
+
+**First, check the edition** — it decides how the backups get scheduled:
+```sql
+SELECT SERVERPROPERTY('Edition') AS edition, SERVERPROPERTY('EngineEdition') AS engine;
+-- EngineEdition 2 = Standard, 3 = Enterprise, 4 = EXPRESS.
+```
+Express has **no SQL Server Agent**, so it can't use Agent jobs — use **3b**.
+Everything else uses **3a**. (Edition, not the instance name: an instance *named*
+`SQLEXPRESS` that is really Standard reports engine 2 and uses 3a.)
+
+#### 3a. Standard / Enterprise (SQL Agent)
+Open `scripts/sql-backup-config.sql`, **set `@fullTime` to this site's Saturday
 slot** (the table above — e.g. Ermelo `040000`), **confirm the DB names**, run it
 (F5). It sets all three DBs to SIMPLE and **creates + configures** the two Agent
 jobs — **FULL Saturday @fullTime** + **DIFF Mon–Fri 01:00** with 9-day local
-retention. (It's the script — not dbatools — that creates the jobs, so it's fine
-that step 2 installed procedures only. Re-runnable — changing `@fullTime` and
-re-running re-times the full.)
+retention. Re-runnable — changing `@fullTime` and re-running re-times the full.
+
+#### 3b. Express (no Agent → Windows Task Scheduler + sqlcmd)
+On Express the config script sets the recovery models and then **stops** (it
+prints that it made no jobs). Schedule the two backups with Task Scheduler instead
+(PowerShell, admin). Express can't compress, so `@Compress` is omitted — its `.bak`
+are uncompressed (bounded: Express caps each DB at 10 GB), and Kopia still dedups
+them off-site.
+```powershell
+$inst = "CARDOSOCISERVER\SQLEXPRESS"                    # this site's Express instance
+$dir  = "C:\Cardoso Customer App\database\sql-backups"
+$common = "@Databases='CARDAT,CARSYS,PPDdata', @Directory='$dir', @Verify='Y', @CheckSum='Y', @CleanupTime=220, @LogToTable='Y'"
+
+# FULL — Saturday at this site's slot
+$full = New-ScheduledTaskAction -Execute 'sqlcmd.exe' `
+  -Argument "-S `"$inst`" -E -b -Q `"EXEC master.dbo.DatabaseBackup @BackupType='FULL', $common`""
+Register-ScheduledTask -TaskName 'CardosoSqlBackupFull' -Force -RunLevel Highest -User 'SYSTEM' `
+  -Action $full -Trigger (New-ScheduledTaskTrigger -Weekly -DaysOfWeek Saturday -At '01:00')  # ← slot
+
+# DIFF — Mon–Fri 01:00
+$diff = New-ScheduledTaskAction -Execute 'sqlcmd.exe' `
+  -Argument "-S `"$inst`" -E -b -Q `"EXEC master.dbo.DatabaseBackup @BackupType='DIFF', $common`""
+Register-ScheduledTask -TaskName 'CardosoSqlBackupDiff' -Force -RunLevel Highest -User 'SYSTEM' `
+  -Action $diff -Trigger (New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday,Tuesday,Wednesday,Thursday,Friday -At '01:00')
+```
+> ⚠ The task runs as **SYSTEM**, which must be able to run backups on the instance
+> (sysadmin, or db_backupoperator on each DB). If it can't, `sqlcmd -E` fails to
+> connect — either run the task as the SQL service account, or in SSMS grant it:
+> `CREATE LOGIN [NT AUTHORITY\SYSTEM] FROM WINDOWS;` then add that login to a role
+> that can back up. Verify by running the FULL task once (step 5) and checking a
+> `.bak` appears.
 
 If CARSYS (or any DB) was in FULL recovery its log may be bloated — reclaim it:
 ```sql
@@ -137,12 +176,13 @@ PsExec64.exe -s "C:\Cardoso Customer App\kopia\kopia.exe" policy set `
 `keep-daily`=son · `keep-weekly`=father · `keep-monthly`=grandfather · +annual long-tail.
 
 ### 5. Seed the baseline + verify
-Run the FULL job once for the off-site baseline, then push it by **triggering the
-registered agent task** (it runs as SYSTEM and is already connected — no PsExec
-needed, and it's exactly what runs nightly):
+Run the FULL once for the off-site baseline, wait for it to finish, then push it
+by triggering the Kopia task (SYSTEM + already connected — no PsExec needed):
 ```powershell
-# in SSMS: right-click 'DatabaseBackup - USER_DATABASES - FULL' → Start Job; wait
-#   for it to finish (Job Activity Monitor), then on the site:
+# Run the full once:
+#   3a (Agent):   in SSMS right-click 'DatabaseBackup - USER_DATABASES - FULL' → Start Job
+#   3b (Express): Start-ScheduledTask -TaskName 'CardosoSqlBackupFull'
+# Wait for it to finish (a .bak appears under database\sql-backups), then:
 Start-ScheduledTask -TaskName 'CardosoKopiaAgent'
 ```
 (If you must snapshot by hand instead, run it as SYSTEM:
