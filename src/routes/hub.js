@@ -18,6 +18,7 @@ import { getHubStorageRuntime } from '../hub/storage/runtime.js';
 import { getKopiaStatus, isKopiaEnabled, listHostSnapshots, normalizeKopiaHost, getKopiaStaleHours } from '../services/hub/kopiaStatus.js';
 import { extractSnapshotDb } from '../services/hub/kopiaRestore.js';
 import { listSnapshotDir, collectSqlOffsite } from '../services/hub/kopiaTree.js';
+import { deleteSnapshot, runMaintenance, isMaintenanceRunning } from '../services/hub/kopiaAdmin.js';
 import { logError } from '../lib/errorLog.js';
 import { safeTokenEqual } from '../lib/safeEqual.js';
 import { logAudit } from '../lib/audit.js';
@@ -471,6 +472,46 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     } catch (err) {
       console.error('[hub-kopia-sql-offsite] error:', err.message);
       res.json({ enabled: isKopiaEnabled(), status: 'never', databases: [], error: err.message });
+    }
+  });
+
+  // DELETE /api/hub/sites/:site_id/kopia-snapshots/:snapshotId
+  // Delete ONE off-site snapshot (a restore point). Admin-only + destructive.
+  // The snapshotId is validated to belong to THIS site's Kopia host first, so a
+  // caller can't delete another site's snapshot by guessing an id. Only unlinks
+  // the manifest — disk is reclaimed by the maintenance route below.
+  router.delete('/api/hub/sites/:site_id/kopia-snapshots/:snapshotId', requireAuth, requireAdmin, requirePermission('can_access_hub_backups'), async (req, res) => {
+    try {
+      const ctx = await resolveKopiaSite(req, res);
+      if (!ctx) return;
+      const { snapshots } = await listHostSnapshots({ host: ctx.host });
+      const snapshotId = req.params.snapshotId;
+      if (!snapshots.some((s) => s.id === snapshotId)) {
+        return res.status(404).json({ error: 'Snapshot not found for this site' });
+      }
+      const result = await deleteSnapshot({ snapshotId });
+      if (!result.ok) return res.status(502).json({ error: result.error || 'kopia snapshot delete failed' });
+      res.json({ ok: true, deleted: snapshotId });
+    } catch (err) {
+      console.error('[hub-kopia-snapshot-delete] error:', err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/hub/kopia-maintenance
+  // Run full Kopia maintenance/GC — reclaims the disk that deleted or expired
+  // snapshots were holding. Admin-only, hub-wide, single-flight (409 if already
+  // running). The request waits for it (can take minutes).
+  router.post('/api/hub/kopia-maintenance', requireAuth, requireAdmin, requirePermission('can_access_hub_backups'), async (req, res) => {
+    if (!isKopiaEnabled()) return res.status(400).json({ error: 'Off-site (Kopia) backups are not enabled on this hub.' });
+    if (isMaintenanceRunning()) return res.status(409).json({ error: 'Maintenance is already running.' });
+    try {
+      const result = await runMaintenance();
+      if (!result.ok) return res.status(result.skipped ? 409 : 502).json({ error: result.error || 'kopia maintenance failed' });
+      res.json({ ok: true, output: result.output });
+    } catch (err) {
+      console.error('[hub-kopia-maintenance] error:', err.message);
+      res.status(500).json({ error: err.message });
     }
   });
 

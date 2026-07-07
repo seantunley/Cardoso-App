@@ -15,10 +15,12 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   Cloud, ExternalLink, RefreshCw, FileArchive, Database, ShieldCheck,
-  Folder, File as FileIcon, ChevronLeft, ChevronRight, HardDrive,
+  Folder, File as FileIcon, ChevronLeft, ChevronRight, HardDrive, Trash2, Wrench,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/components/ui/use-toast";
+import { useAuth } from "@/lib/AuthContext";
 import { toneFor } from "./backupTone.js";
 import { fmtBytes, fmtRelative, fmtDate } from "./backupModel.js";
 import { buildDemoKopiaSnapshots } from "./backupDemo.js";
@@ -183,11 +185,17 @@ function TreeBrowser({ siteId, snapshot, demo, onBack }) {
 }
 
 export default function SnapshotsDialog({ site, demo, kopiaUiUrl, onOpenKopiaUi, onClose }) {
+  const { toast } = useToast();
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const [snapshots, setSnapshots] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [sql, setSql] = useState(null);
   const [browse, setBrowse] = useState(null); // selected snapshot to browse
+  const [reload, setReload] = useState(0);     // bump to refetch after a delete
+  const [deletingId, setDeletingId] = useState(null);
+  const [maintaining, setMaintaining] = useState(false);
 
   useEffect(() => {
     if (!site) return;
@@ -223,7 +231,34 @@ export default function SnapshotsDialog({ site, demo, kopiaUiUrl, onOpenKopiaUi,
       .catch(() => { if (!cancelled) setSql({ status: "never", databases: [], error: "Could not check SQL backups." }); });
 
     return () => { cancelled = true; };
-  }, [site, demo]);
+  }, [site, demo, reload]);
+
+  const handleDelete = useCallback(async (snap) => {
+    if (demo) { toast({ title: "Demo mode", description: "Would delete this snapshot." }); return; }
+    if (!window.confirm(`Delete this off-site snapshot (${fmtDate(snap.endTime)})?\n\nThis removes that restore point. Disk is reclaimed on the next maintenance run.`)) return;
+    setDeletingId(snap.id);
+    try {
+      const r = await fetch(api(site.site_id, `kopia-snapshots/${encodeURIComponent(snap.id)}`), { method: "DELETE", credentials: "include" });
+      if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `HTTP ${r.status}`); }
+      toast({ title: "Snapshot deleted", description: "Run maintenance to reclaim the disk." });
+      setReload((n) => n + 1);
+    } catch (err) {
+      toast({ title: "Delete failed", description: err.message, variant: "destructive" });
+    } finally { setDeletingId(null); }
+  }, [demo, site, toast]);
+
+  const handleMaintenance = useCallback(async () => {
+    if (demo) { toast({ title: "Demo mode", description: "Would run Kopia maintenance." }); return; }
+    if (!window.confirm("Run full Kopia maintenance now?\n\nThis reclaims disk from deleted / expired snapshots and can take several minutes.")) return;
+    setMaintaining(true);
+    try {
+      const r = await fetch("/api/hub/kopia-maintenance", { method: "POST", credentials: "include" });
+      if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `HTTP ${r.status}`); }
+      toast({ title: "Maintenance complete", description: "Disk from deleted / expired snapshots has been reclaimed." });
+    } catch (err) {
+      toast({ title: "Maintenance failed", description: err.message, variant: "destructive" });
+    } finally { setMaintaining(false); }
+  }, [demo, toast]);
 
   const total = snapshots?.reduce((s, x) => s + (x.totalSize || 0), 0) ?? 0;
 
@@ -265,7 +300,7 @@ export default function SnapshotsDialog({ site, demo, kopiaUiUrl, onOpenKopiaUi,
               ) : (
                 <div className="max-h-72 overflow-y-auto rounded-lg border border-border">
                   <div className="grid grid-cols-[1.4fr_0.8fr_0.8fr_auto] gap-2 border-b border-border bg-muted/30 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    <span>When</span><span>Size</span><span>Files</span><span>Browse</span>
+                    <span>When</span><span>Size</span><span>Files</span><span className="text-right">Actions</span>
                   </div>
                   {snapshots.map((s) => (
                     <div key={s.id || s.endTime} className="grid grid-cols-[1.4fr_0.8fr_0.8fr_auto] items-center gap-2 border-b border-border/60 px-3 py-2 text-xs last:border-0">
@@ -275,13 +310,25 @@ export default function SnapshotsDialog({ site, demo, kopiaUiUrl, onOpenKopiaUi,
                       </div>
                       <span className="font-mono tabular-nums text-foreground">{fmtBytes(s.totalSize)}</span>
                       <span className="font-mono tabular-nums text-muted-foreground">{s.fileCount != null ? s.fileCount.toLocaleString() : "—"}</span>
-                      <Button
-                        variant="outline" size="sm" className="h-7 px-2 text-[11px]"
-                        disabled={!s.rootID} title={s.rootID ? "Browse this snapshot's files" : "This snapshot can't be browsed"}
-                        onClick={() => setBrowse(s)}
-                      >
-                        <HardDrive className="mr-1 h-3 w-3" />Browse
-                      </Button>
+                      <div className="flex items-center justify-end gap-1">
+                        <Button
+                          variant="outline" size="sm" className="h-7 px-2 text-[11px]"
+                          disabled={!s.rootID} title={s.rootID ? "Browse this snapshot's files" : "This snapshot can't be browsed"}
+                          onClick={() => setBrowse(s)}
+                        >
+                          <HardDrive className="mr-1 h-3 w-3" />Browse
+                        </Button>
+                        {isAdmin && !demo && (
+                          <Button
+                            variant="outline" size="sm"
+                            className="h-7 px-2 text-[11px] text-status-critical hover:border-status-critical/60"
+                            disabled={deletingId === s.id || !s.id} title="Delete this snapshot"
+                            onClick={() => handleDelete(s)}
+                          >
+                            {deletingId === s.id ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -290,8 +337,17 @@ export default function SnapshotsDialog({ site, demo, kopiaUiUrl, onOpenKopiaUi,
           )}
 
           <div className="flex items-center justify-between gap-2 border-t border-border pt-3">
-            <span className="text-[11px] text-muted-foreground">Read-only view · full retention &amp; restore live in the Kopia UI</span>
+            <span className="text-[11px] text-muted-foreground">
+              {isAdmin ? "Delete snapshots you don't need, then run maintenance to reclaim the disk." : "Read-only view · restore is a separate action."}
+            </span>
             <div className="flex gap-2">
+              {isAdmin && !demo && (
+                <Button variant="outline" size="sm" className="h-8 text-xs" disabled={maintaining} onClick={handleMaintenance}
+                  title="Reclaim disk from deleted / expired snapshots (can take minutes)">
+                  {maintaining ? <RefreshCw className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Wrench className="mr-1.5 h-3.5 w-3.5" />}
+                  {maintaining ? "Running…" : "Run maintenance"}
+                </Button>
+              )}
               {kopiaUiUrl && (
                 <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => onOpenKopiaUi(kopiaUiUrl)}>
                   <ExternalLink className="mr-1.5 h-3.5 w-3.5" />Open Kopia UI
