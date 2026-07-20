@@ -26,6 +26,7 @@ const SITES = [
     hub: { count: 12, lastH: 2, size: 4_410_000, integrity: "ok" },
     sql: { ok: true, health: "ok", dbs: sqlDbs(true) },
     kopia: { status: "ok", reason: "ok", lastH: 3, count: 9, bytes: 4_300_000 },
+    sqlOff: { status: "ok", newestH: 3 },
   },
   {
     id: "site-jhb", name: "Johannesburg", url: "http://10.20.1.11:3001",
@@ -41,6 +42,9 @@ const SITES = [
     hub: { count: 8, lastH: 27, size: 3_980_000, integrity: "ok" },
     sql: { ok: true, health: "ok", dbs: sqlDbs(true) },
     kopia: { status: "ok", reason: "ok", lastH: 5, count: 7, bytes: 3_900_000 },
+    // Snapshot is current, but the SQL .bak inside it has gone stale — the case
+    // the SQL dot exists to catch (Ola job failed while snapshots kept running).
+    sqlOff: { status: "stale", newestH: 40 },
   },
   {
     id: "site-klerksdorp", name: "Klerksdorp", url: "http://10.20.3.11:3001",
@@ -63,6 +67,7 @@ const SITES = [
     hub: { count: 22, lastH: 1, size: 6_030_000, integrity: "corrupt" },
     sql: { ok: true, health: "ok", dbs: sqlDbs(true) },
     kopia: { status: "ok", reason: "ok", lastH: 2, count: 11, bytes: 5_900_000 },
+    sqlOff: { status: "ok", newestH: 2 },
   },
   {
     id: "site-nelspruit", name: "Nelspruit", url: "http://10.20.6.11:3001",
@@ -110,7 +115,25 @@ export function buildDemoData() {
     total_bytes: s.kopia.bytes,
   }]));
 
-  return { backupStatus, hubBackupMap, kopiaMap, kopiaEnabled: true, ui_url: "https://kopia.hub.local:51515" };
+  // SQL-in-off-site verdict per site (GET /api/hub/kopia-sql-status shape).
+  // Sites without a `sqlOff` simply don't send SQL off-site → the dot hides.
+  const sqlOffsiteMap = Object.fromEntries(
+    SITES.filter((s) => s.sqlOff).map((s) => {
+      const newestAt = ago(s.sqlOff.newestH);
+      return [s.id, {
+        site_id: s.id,
+        status: s.sqlOff.status,
+        newest_at: newestAt,
+        age_hours: s.sqlOff.newestH,
+        databases: ["CARDAT", "CARSYS", "PPDdata"].map((name) => ({
+          name, status: s.sqlOff.status,
+          full_at: ago(s.sqlOff.newestH + 24), diff_at: newestAt, newest_at: newestAt,
+        })),
+      }];
+    }),
+  );
+
+  return { backupStatus, hubBackupMap, kopiaMap, sqlOffsiteMap, kopiaEnabled: true, ui_url: "https://kopia.hub.local:51515" };
 }
 
 // Snapshot history for the in-app "View snapshots" viewer (?demo=1). Shaped

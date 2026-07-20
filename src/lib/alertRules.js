@@ -17,6 +17,7 @@ import { getSageHealth } from '../services/batReconciliation.js';
 import { ruleSecuritySignals } from './securitySignals.js';
 import { computeBackupHealth } from './backupHealth.js';
 import { getKopiaStatus, isKopiaEnabled } from '../services/hub/kopiaStatus.js';
+import { collectSqlOffsite } from '../services/hub/kopiaTree.js';
 import { getRoleConnectionId } from '../services/connectionRoles.js';
 
 // Lazy-prepared statement cache. Mirrors the pattern in alertEngine.js so
@@ -497,9 +498,10 @@ async function ruleKopiaSiteStale() {
   const clearAll = () => {
     resolveAlerts('kopia-repo-error', 'auto');
     try {
-      const actives = _prep('activeKopiaSiteStale', `
+      const actives = _prep('activeKopiaAny', `
         SELECT dedup_key FROM alerts
-        WHERE resolved_at IS NULL AND dedup_key LIKE 'kopia-site-stale:%'
+        WHERE resolved_at IS NULL
+          AND (dedup_key LIKE 'kopia-site-stale:%' OR dedup_key LIKE 'kopia-sql-stale:%')
       `).all();
       for (const a of actives) resolveAlerts(a.dedup_key, 'auto');
     } catch (err) {
@@ -577,6 +579,58 @@ async function ruleKopiaSiteStale() {
   }
   for (const a of actives) {
     if (!staleKeys.has(a.dedup_key)) resolveAlerts(a.dedup_key, 'auto');
+  }
+
+  // ── SQL Server backups reaching the hub ──────────────────────────────────
+  // The site's SQL .bak files ride inside the same snapshot (see
+  // docs/sql-backup-setup.md). A fresh snapshot doesn't prove the SQL backup
+  // inside it is fresh — the Ola job can fail while the snapshot keeps running.
+  // Read the newest snapshot of each site whose snapshot is CURRENT and check
+  // the SQL folder. Fire only when a site that WAS backing SQL up has gone
+  // stale ('stale') — never on 'never'/not-configured, so a site with no SQL
+  // Server is never nagged.
+  const sqlKeys = new Set();
+  const current = status.sites.filter((s) => s.status === 'ok' && s.site_id && s.last_root_id);
+  const verdicts = await Promise.all(current.map(async (s) => {
+    try {
+      const v = await collectSqlOffsite({ rootID: s.last_root_id, staleHours: status.stale_hours });
+      return { s, v };
+    } catch (err) {
+      console.error(`[alertRules] kopia sql-offsite for ${s.site_name || s.site}: ${err.message}`);
+      return null;
+    }
+  }));
+  for (const row of verdicts) {
+    if (!row || row.v.status !== 'stale') continue; // only alert on a real regression
+    const { s, v } = row;
+    const key = `kopia-sql-stale:${s.site_id}`;
+    sqlKeys.add(key);
+    const label = s.site_name || s.site;
+    const dbList = v.databases.map((d) => d.name).join(', ') || 'unknown';
+    fireAlert({
+      ruleName: 'kopia-sql-stale',
+      severity: 'critical',
+      message: `SQL Server backup for '${label}' is not reaching the hub — newest off-site .bak is ${v.age_hours != null ? `${v.age_hours.toFixed(1)}h old` : 'of unknown age'} (threshold ${status.stale_hours}h). Databases: ${dbList}.`,
+      context: {
+        site: s.site, site_id: s.site_id, age_hours: v.age_hours,
+        newest_at: v.newest_at, databases: v.databases,
+      },
+      dedupKey: key,
+    });
+  }
+  // Resolve SQL alerts for sites that recovered (or are no longer 'current').
+  let sqlActives;
+  try {
+    sqlActives = _prep('activeKopiaSqlStale', `
+      SELECT dedup_key FROM alerts
+      WHERE resolved_at IS NULL AND dedup_key LIKE 'kopia-sql-stale:%'
+    `).all();
+  } catch (err) {
+    if (/no such table/i.test(err.message)) return;
+    throw err;
+  }
+  for (const a of sqlActives) {
+    if (!sqlKeys.has(a.dedup_key)) resolveAlerts(a.dedup_key, 'auto');
   }
 }
 

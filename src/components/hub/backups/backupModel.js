@@ -68,12 +68,13 @@ function sqlStatusOf(site) {
  *   scores critical and healthy sites flip to Problems until (or unless) that
  *   query returns.
  */
-export function normalizeSites({ backupStatus, hubBackupMap = {}, kopiaMap = {}, kopiaEnabled = false, hubKnown = true }) {
+export function normalizeSites({ backupStatus, hubBackupMap = {}, kopiaMap = {}, sqlOffsiteMap = {}, kopiaEnabled = false, hubKnown = true }) {
   const sites = backupStatus?.sites || [];
   return sites.map((site) => {
     const id = site.site_id;
     const hub = hubBackupMap[id] || null;
     const kopia = kopiaMap[id] || null;
+    const sqlOff = sqlOffsiteMap[id] || null;
 
     const local = {
       status: site.status || "unknown",
@@ -112,6 +113,21 @@ export function normalizeSites({ backupStatus, hubBackupMap = {}, kopiaMap = {},
       message: site.sql_backup?.message || null,
     };
 
+    // SQL-in-off-site: whether the SQL Server .bak files rode into the newest
+    // Kopia snapshot and are fresh. Distinct from the SQL-DAT layer (which polls
+    // the site) — this reads what actually reached the hub. 'never' can mean the
+    // site simply doesn't send SQL off-site, so the UI treats it as N/A rather
+    // than a failure; 'stale' is a real problem and 'error' means the tree
+    // couldn't be read (surfaced, not swallowed).
+    const sqlOffsite = {
+      status: sqlOff?.status || null, // 'ok' | 'stale' | 'never' | 'error' | null(unknown)
+      newestAt: sqlOff?.newest_at || null,
+      ageHours: sqlOff?.age_hours ?? null,
+      databases: sqlOff?.databases || [],
+      error: sqlOff?.error || null,
+      applicable: !!sqlOff && sqlOff.status !== "never",
+    };
+
     const offsite = {
       enabled: kopiaEnabled,
       status: !kopiaEnabled ? "off" : kopia ? (kopia.status === "ok" ? "ok" : kopia.reason === "never" ? "never" : "stale") : "unknown",
@@ -119,6 +135,7 @@ export function normalizeSites({ backupStatus, hubBackupMap = {}, kopiaMap = {},
       lastAt: kopia?.last_snapshot_at || null,
       count: kopia?.count ?? 0,
       bytes: kopia?.total_bytes ?? null,
+      sql: sqlOffsite,
     };
 
     // Overall rollup: local + hub always; off-site only when the feature is on;

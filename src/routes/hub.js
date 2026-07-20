@@ -15,8 +15,10 @@ import { boolFromRow, expandDataRecord } from '../helpers.js';
 import { syncAllSites, syncSite, runHubBackupPull, pullBackupForSite, HUB_SITES } from '../services/hubEtl.js';
 import { runConnectionImport } from '../services/syncEngine.js';
 import { getHubStorageRuntime } from '../hub/storage/runtime.js';
-import { getKopiaStatus, isKopiaEnabled, listHostSnapshots, normalizeKopiaHost } from '../services/hub/kopiaStatus.js';
+import { getKopiaStatus, isKopiaEnabled, listHostSnapshots, normalizeKopiaHost, getKopiaStaleHours } from '../services/hub/kopiaStatus.js';
 import { extractSnapshotDb } from '../services/hub/kopiaRestore.js';
+import { listSnapshotDir, collectSqlOffsite } from '../services/hub/kopiaTree.js';
+import { deleteSnapshot, runMaintenance, isMaintenanceRunning } from '../services/hub/kopiaAdmin.js';
 import { logError } from '../lib/errorLog.js';
 import { safeTokenEqual } from '../lib/safeEqual.js';
 import { logAudit } from '../lib/audit.js';
@@ -382,6 +384,134 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     } catch (err) {
       console.error('[hub-kopia-snapshots] error:', err.message);
       res.json({ enabled: isKopiaEnabled(), snapshots: [], error: err.message });
+    }
+  });
+
+  // Resolve the site + Kopia host for a snapshot-inspection route, applying the
+  // same permission/allow-list gate as kopia-snapshots. Returns null (and sends
+  // the response) on any failure so the caller can just `if (!ctx) return`.
+  async function resolveKopiaSite(req, res) {
+    if (!isKopiaEnabled()) { res.json({ enabled: false, error: null }); return null; }
+    const site = db.prepare('SELECT id, slug, name FROM hub_sites WHERE id = ?').get(req.params.site_id);
+    if (!site) { res.status(404).json({ error: 'Site not found' }); return null; }
+    const allowed = getAllowedSiteIds(req, res);
+    if (allowed !== null && !allowed.has(site.id)) { res.status(403).json({ error: 'Not permitted for this site' }); return null; }
+    return { site, host: normalizeKopiaHost(site) };
+  }
+
+  // GET /api/hub/sites/:site_id/kopia-snapshots/:rootID/ls?path=<subdir>
+  // Browse the file tree INSIDE one off-site snapshot (the "browse snapshot"
+  // viewer). Read-only. The rootID is validated to belong to THIS site's Kopia
+  // host before anything is read — a snapshot is owned by exactly one site, so
+  // this is what keeps one branch from ever browsing another's tree even if two
+  // sites share a database name.
+  router.get('/api/hub/sites/:site_id/kopia-snapshots/:rootID/ls', requireAuth, requirePermission('can_access_hub_backups'), async (req, res) => {
+    try {
+      const ctx = await resolveKopiaSite(req, res);
+      if (!ctx) return;
+      const { snapshots } = await listHostSnapshots({ host: ctx.host });
+      const rootID = req.params.rootID;
+      if (!snapshots.some((s) => s.rootID === rootID)) {
+        return res.status(404).json({ error: 'Snapshot not found for this site' });
+      }
+      const result = await listSnapshotDir({ rootID, subPath: req.query.path || '' });
+      res.json({ enabled: true, rootID, ...result });
+    } catch (err) {
+      console.error('[hub-kopia-ls] error:', err.message);
+      res.json({ enabled: isKopiaEnabled(), entries: [], error: err.message });
+    }
+  });
+
+  // GET /api/hub/kopia-sql-status
+  // Aggregate: the SQL-off-site verdict for EVERY site in one call, so the fleet
+  // table can show a per-site "SQL reached the hub" dot without N round-trips.
+  // Polled less often than kopia-status (SQL backups are nightly) — see the page.
+  // Read-only; each site's newest snapshot is read in parallel.
+  router.get('/api/hub/kopia-sql-status', requireAuth, requirePermission('can_access_hub_backups'), async (req, res) => {
+    try {
+      if (!isKopiaEnabled()) return res.json({ enabled: false, sites: [], error: null });
+      let knownSites = [];
+      try { knownSites = db.prepare('SELECT id, name, slug FROM hub_sites WHERE COALESCE(in_env, 1) = 1').all(); } catch { /* table not ready */ }
+      const allowed = getAllowedSiteIds(req, res);
+      if (allowed !== null) knownSites = knownSites.filter((s) => allowed.has(s.id));
+
+      const status = await getKopiaStatus({ knownSites });
+      const staleHours = getKopiaStaleHours();
+      const sites = await Promise.all(
+        (status.sites || [])
+          .filter((s) => s.site_id && (allowed === null || allowed.has(s.site_id)))
+          .map(async (s) => {
+            if (!s.last_root_id) return { site_id: s.site_id, site_name: s.site_name, status: 'never', reason: 'no_snapshot', databases: [], newest_at: null, age_hours: null };
+            const v = await collectSqlOffsite({ rootID: s.last_root_id, staleHours });
+            return { site_id: s.site_id, site_name: s.site_name, ...v };
+          }),
+      );
+      res.json({ enabled: true, sites, error: status.error || null });
+    } catch (err) {
+      console.error('[hub-kopia-sql-status] error:', err.message);
+      res.json({ enabled: isKopiaEnabled(), sites: [], error: err.message });
+    }
+  });
+
+  // GET /api/hub/sites/:site_id/sql-offsite
+  // Verdict on whether this site's SQL Server backups (Ola .bak) actually made
+  // it off-site and are fresh — read from the site's NEWEST snapshot. Powers the
+  // SQL confirmation panel in the snapshots viewer; the same check drives the
+  // kopia-sql-stale alert server-side. Read-only.
+  router.get('/api/hub/sites/:site_id/sql-offsite', requireAuth, requirePermission('can_access_hub_backups'), async (req, res) => {
+    try {
+      const ctx = await resolveKopiaSite(req, res);
+      if (!ctx) return;
+      const { snapshots } = await listHostSnapshots({ host: ctx.host });
+      const newest = snapshots[0] || null; // listHostSnapshots is newest-first
+      if (!newest?.rootID) {
+        return res.json({ enabled: true, status: 'never', reason: 'no_snapshot', databases: [], newest_at: null, error: null });
+      }
+      const verdict = await collectSqlOffsite({ rootID: newest.rootID, staleHours: getKopiaStaleHours() });
+      res.json({ enabled: true, snapshot_at: newest.endTime, ...verdict });
+    } catch (err) {
+      console.error('[hub-kopia-sql-offsite] error:', err.message);
+      res.json({ enabled: isKopiaEnabled(), status: 'never', databases: [], error: err.message });
+    }
+  });
+
+  // DELETE /api/hub/sites/:site_id/kopia-snapshots/:snapshotId
+  // Delete ONE off-site snapshot (a restore point). Admin-only + destructive.
+  // The snapshotId is validated to belong to THIS site's Kopia host first, so a
+  // caller can't delete another site's snapshot by guessing an id. Only unlinks
+  // the manifest — disk is reclaimed by the maintenance route below.
+  router.delete('/api/hub/sites/:site_id/kopia-snapshots/:snapshotId', requireAuth, requireAdmin, requirePermission('can_access_hub_backups'), async (req, res) => {
+    try {
+      const ctx = await resolveKopiaSite(req, res);
+      if (!ctx) return;
+      const { snapshots } = await listHostSnapshots({ host: ctx.host });
+      const snapshotId = req.params.snapshotId;
+      if (!snapshots.some((s) => s.id === snapshotId)) {
+        return res.status(404).json({ error: 'Snapshot not found for this site' });
+      }
+      const result = await deleteSnapshot({ snapshotId });
+      if (!result.ok) return res.status(502).json({ error: result.error || 'kopia snapshot delete failed' });
+      res.json({ ok: true, deleted: snapshotId });
+    } catch (err) {
+      console.error('[hub-kopia-snapshot-delete] error:', err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/hub/kopia-maintenance
+  // Run full Kopia maintenance/GC — reclaims the disk that deleted or expired
+  // snapshots were holding. Admin-only, hub-wide, single-flight (409 if already
+  // running). The request waits for it (can take minutes).
+  router.post('/api/hub/kopia-maintenance', requireAuth, requireAdmin, requirePermission('can_access_hub_backups'), async (req, res) => {
+    if (!isKopiaEnabled()) return res.status(400).json({ error: 'Off-site (Kopia) backups are not enabled on this hub.' });
+    if (isMaintenanceRunning()) return res.status(409).json({ error: 'Maintenance is already running.' });
+    try {
+      const result = await runMaintenance();
+      if (!result.ok) return res.status(result.skipped ? 409 : 502).json({ error: result.error || 'kopia maintenance failed' });
+      res.json({ ok: true, output: result.output });
+    } catch (err) {
+      console.error('[hub-kopia-maintenance] error:', err.message);
+      res.status(500).json({ error: err.message });
     }
   });
 
