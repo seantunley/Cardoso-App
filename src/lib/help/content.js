@@ -8,6 +8,7 @@
 import { HELP_CATEGORIES } from "./categories.js";
 import { gettingStartedArticles } from "./articles/getting-started.js";
 import { customersArticles } from "./articles/customers.js";
+import { creditorsArticles } from "./articles/creditors.js";
 import { inventoryArticles } from "./articles/inventory.js";
 import { reportsArticles } from "./articles/reports.js";
 import { reconciliationArticles } from "./articles/reconciliation.js";
@@ -20,6 +21,7 @@ import { adminArticles } from "./articles/admin.js";
 export const HELP_ARTICLES = [
   ...gettingStartedArticles,
   ...customersArticles,
+  ...creditorsArticles,
   ...inventoryArticles,
   ...reportsArticles,
   ...reconciliationArticles,

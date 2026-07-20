@@ -24,6 +24,12 @@ export const HELP_CATEGORIES = [
     icon: "Users",
   },
   {
+    key: "creditors",
+    label: "Creditors",
+    description: "Vendor balances, payments, and purchase activity.",
+    icon: "Building2",
+  },
+  {
     key: "reconciliation",
     label: "BAT & reconciliation",
     description: "Reconciling BAT claims against Sage.",
