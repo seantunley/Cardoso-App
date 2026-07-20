@@ -362,6 +362,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import CommandPalette from "@/components/CommandPalette";
 import HealthStrip from "@/components/HealthStrip";
+import SidebarHelpSettings from "@/components/SidebarHelpSettings";
 import { buildSettingsTabGroups } from "@/components/settings/settingsTabs";
 import NotificationsBell from "@/components/NotificationsBell";
 import { lazy, Suspense, useEffect, useState } from "react";
@@ -918,6 +919,18 @@ export default function Layout({ children, currentPageName }) {
           className={cn(isCollapsed ? "p-1 flex flex-col items-center space-y-0.5" : "p-3")}
           style={{ borderTop: "1px solid hsl(var(--sidebar-border))" }}
         >
+          {/* Help + Settings flyouts, directly above the account menu. Settings
+              deep-links into the existing SettingsPanel via the SAME tab
+              registry the palette uses (buildSettingsTabGroups). */}
+          <SidebarHelpSettings
+            collapsed={isCollapsed}
+            canSeeSettings={canSeeSettings}
+            settingsGroups={buildSettingsTabGroups({ currentUser, hubMode })}
+            onOpenSettingsTab={(tabId) => { setSettingsInitialTab(tabId); setSettingsOpen(true); }}
+            onOpenCommandPalette={() => setCmdOpen(true)}
+            appVersion={versionStatus.currentVersion}
+          />
+          {!isCollapsed && <div className="my-2 h-px bg-[hsl(var(--sidebar-border))]" />}
           {isCollapsed ? (
             <>
               {canSeeSettings && (
