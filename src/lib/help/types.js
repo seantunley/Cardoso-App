@@ -36,6 +36,7 @@
  * @typedef {(
  *   | "getting-started"
  *   | "customers"
+ *   | "creditors"
  *   | "reconciliation"
  *   | "inventory"
  *   | "reports"
