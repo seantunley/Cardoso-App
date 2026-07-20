@@ -342,7 +342,6 @@ import {
   DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import CommandPalette from "@/components/CommandPalette";
-import HealthStrip from "@/components/HealthStrip";
 import SidebarHelpSettings from "@/components/SidebarHelpSettings";
 import { buildSettingsTabGroups } from "@/components/settings/settingsTabs";
 import NotificationsBell from "@/components/NotificationsBell";
@@ -916,10 +915,6 @@ export default function Layout({ children, currentPageName }) {
             );
           })()}
         </nav>
-        {/* At-a-glance subsystem health (Sage / Syncs / Backup / Alerts) —
-            named outcomes, not the bell's single anonymous dot. Derives from
-            the same /api/system/sage-health poll the bell shares. */}
-        <HealthStrip collapsed={isCollapsed} isAdmin={isAdmin} />
         <div
           className={cn(isCollapsed ? "p-1 flex flex-col items-center space-y-0.5" : "p-3")}
           style={{ borderTop: "1px solid hsl(var(--sidebar-border))" }}
