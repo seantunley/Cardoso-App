@@ -8,7 +8,7 @@
 
 import { useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { ArrowLeft, ArrowRight, ChevronLeft } from "lucide-react";
+import { ArrowLeft, ArrowRight, ChevronLeft, FileText } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import HelpNav from "@/components/help/HelpNav";
 import ArticleBody from "@/components/help/ArticleBody";
@@ -42,6 +42,16 @@ function HelpLanding() {
       <PageHeader
         title="Help centre"
         subtitle="Guides for using the Cardoso app, organised by area. Search on the left, or pick a topic below."
+        actions={
+          <a
+            href="/manual"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--phosphor)]"
+          >
+            <FileText className="h-4 w-4" /> Printable manual
+          </a>
+        }
       />
       <div className="grid gap-4 sm:grid-cols-2">
         {groups.map((group) => {
