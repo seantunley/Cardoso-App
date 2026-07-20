@@ -1,0 +1,612 @@
+%PDF-1.3
+%ºß¬à
+3 0 obj
+<</Type /Page
+/Parent 1 0 R
+/Resources 2 0 R
+/MediaBox [0 0 595.2799999999999727 841.8899999999999864]
+/Contents 4 0 R
+>>
+endobj
+4 0 obj
+<<
+/Length 7794
+>>
+stream
+0.5670000000000001 w
+0 G
+0.11 0.15 0.23 rg
+0. 841.8899999999999864 595.2799999999999727 -90.708661417322844 re
+f
+BT
+/F2 18 Tf
+20.6999999999999993 TL
+1. g
+51.0236220472441033 796.5356692913385359 Td
+(Cardoso App) Tj
+ET
+BT
+/F1 11 Tf
+12.6499999999999986 TL
+0.804 0.831 0.871 rg
+51.0236220472441033 773.8585039370078675 Td
+(Product Update) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0.804 0.831 0.871 rg
+493.4563779527558154 773.8585039370078675 Td
+(3 July 2026) Tj
+ET
+BT
+/F1 10.5 Tf
+12.0749999999999993 TL
+0.353 0.392 0.451 rg
+51.0236220472441033 717.1655905511811397 Td
+(This update \(v2026.5.11\) delivers a major upgrade to the Hub Backups page — now a scannable fleet) Tj
+T* (table with off-site Kopia restore built in — plus a new sidebar health strip for at-a-glance subsystem status,) Tj
+T* (richer Ctrl+K command palette actions, and filtering and export tools on two log screens. A set of reliability) Tj
+T* (fixes tighten local backup pruning, improve Kopia connectivity diagnostics, harden monthly export stability,) Tj
+T* (and correct Hub copy status accuracy so nothing is shown as healthy when it shouldn't be.) Tj
+ET
+BT
+/F2 13 Tf
+14.9499999999999993 TL
+0.129 0.145 0.161 rg
+51.0236220472441033 626.4569291338582389 Td
+(New Features) Tj
+ET
+0.09 0.48 0.31 rg
+513.2500787401573916 638.9293700787401349 m
+540.8548031496062549 638.9293700787401349 l
+542.7334410387944672 638.9293700787401349 544.2563779527558836 637.4064331647787185 544.2563779527558836 635.5277952755905062 c
+544.2563779527558836 625.3230708661417339 l
+544.2563779527558836 623.4444329769534079 542.3777400635676713 621.9214960629921052 540.8548031496062549 621.9214960629921052 c
+513.2500787401573916 621.9214960629921052 l
+511.3714408509691793 621.9214960629921052 509.8485039370078198 623.8001339521803175 509.8485039370078198 625.3230708661417339 c
+509.8485039370078198 635.5277952755905062 l
+509.8485039370078198 637.4064331647787185 511.7271418261960321 638.9293700787401349 513.2500787401573916 638.9293700787401349 c
+h
+f
+BT
+/F2 7.5 Tf
+8.625 TL
+1. g
+518.3524409448818915 626.4569291338582389 Td
+(NEW) Tj
+ET
+0.87 0.89 0.91 RG
+0.8503937007874016 w
+51.0236220472441033 617.952992125984224 m
+544.2563779527558836 617.952992125984224 l
+S
+0.09 0.48 0.31 rg
+51.0236220472441033 609.4490551181102092 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 600.9451181102361943 Td
+(Hub Backups redesigned as a fleet table with off-site restore) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 586.7718897637794271 Td
+(The Hub Backups page has been completely redesigned as a scannable fleet table. Every site's) Tj
+T* (local, SQL Server, and off-site Kopia backup states are now first-class columns on a single) Tj
+T* (screen — no need to click into each site separately. Head-office users can also browse the) Tj
+T* (off-site Kopia snapshot repository directly in the app \(with a link to the Kopia UI for deeper) Tj
+T* (detail\), and initiate a restore without leaving Cardoso: stage a snapshot, download it, and push it) Tj
+T* (to the live site in one flow.) Tj
+ET
+0.09 0.48 0.31 rg
+51.0236220472441033 500.8821259842518998 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 492.378188976377885 Td
+(Sidebar health strip) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 478.2049606299211746 Td
+(A compact health strip now appears in the sidebar, showing the status of key subsystems —) Tj
+T* (such as backup and data sync — at a glance. Named subsystem outcomes are displayed in a) Tj
+T* (2×2 grid so you can see at a glance whether everything is healthy without navigating away from) Tj
+T* (your current page.) Tj
+ET
+0.09 0.48 0.31 rg
+51.0236220472441033 419.5277952755905062 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 411.0238582677164914 Td
+(Command palette — actions and settings deep-links) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 396.850629921259781 Td
+(The Ctrl+K command palette has been extended beyond page navigation. It now supports direct) Tj
+T* (actions and can deep-link into specific settings tabs, reducing the steps needed to reach) Tj
+T* (configuration screens. Quick entity search is also wired in so you can jump to a specific record) Tj
+T* (directly from the palette.) Tj
+ET
+0.09 0.48 0.31 rg
+51.0236220472441033 338.1734645669291126 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 329.6695275590550409 Td
+(Log screens — filter, column picker, and CSV export) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 315.4962992125983874 Td
+(Two log screens now include a DataTable toolbar with a live search filter, a column visibility) Tj
+T* (picker to show only the fields you need, and a one-click CSV export of the current view.) Tj
+ET
+BT
+/F2 13 Tf
+14.9499999999999993 TL
+0.129 0.145 0.161 rg
+51.0236220472441033 264.1892125984251152 Td
+(Improvements) Tj
+ET
+0.15 0.39 0.64 rg
+490.8250787401573803 276.661653543307068 m
+540.8548031496061412 276.661653543307068 l
+542.7334410387943535 276.661653543307068 544.2563779527557699 275.1387166293457085 544.2563779527557699 273.2600787401574962 c
+544.2563779527557699 263.055354330708667 l
+544.2563779527557699 261.1767164415204547 542.3777400635675576 259.6537795275590952 540.8548031496061412 259.6537795275590952 c
+490.8250787401573803 259.6537795275590952 l
+488.946440850969168 259.6537795275590952 487.4235039370078084 261.5324174167473075 487.4235039370078084 263.055354330708667 c
+487.4235039370078084 273.2600787401574962 l
+487.4235039370078084 275.1387166293457085 489.3021418261960207 276.661653543307068 490.8250787401573803 276.661653543307068 c
+h
+f
+BT
+/F2 7.5 Tf
+8.625 TL
+1. g
+495.9274409448818233 264.1892125984251152 Td
+(IMPROVED) Tj
+ET
+0.87 0.89 0.91 RG
+0.8503937007874016 w
+51.0236220472441033 255.6852755905511287 m
+544.2563779527558836 255.6852755905511287 l
+S
+0.15 0.39 0.64 rg
+51.0236220472441033 247.1813385826771139 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 238.6774015748030706 Td
+(Hub copy status stays accurate while data loads) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 224.5041732283464171 Td
+(The hub-copy backup status no longer shows 'never synced' while the underlying query is still) Tj
+T* (resolving. A stalled hub copy is also now aged correctly — it no longer shows as green \(healthy\)) Tj
+T* (when the last successful pull is overdue.) Tj
+ET
+0.15 0.39 0.64 rg
+51.0236220472441033 179.4333070866141213 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 170.9293700787401349 Td
+(Inventory data loads without freezing the app) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 156.7561417322833677 Td
+(The sales-rollup rebuild — which runs during inventory syncs — is now broken into smaller) Tj
+T* (yielding steps. Large datasets no longer cause the application to pause or become) Tj
+T* (unresponsive, and concurrent warm-up requests are handled cleanly without duplicated work.) Tj
+ET
+0.87 0.89 0.91 RG
+0.8503937007874016 w
+51.0236220472441033 34.0157480314960665 m
+544.2563779527558836 34.0157480314960665 l
+S
+BT
+/F1 8 Tf
+9.1999999999999993 TL
+0.353 0.392 0.451 rg
+51.0236220472441033 19.8425196850394059 Td
+(Cardoso App · 3 July 2026) Tj
+ET
+BT
+/F1 8 Tf
+9.1999999999999993 TL
+0.353 0.392 0.451 rg
+503.6163779527558404 19.8425196850394059 Td
+(Page 1 of 2) Tj
+ET
+endstream
+endobj
+5 0 obj
+<</Type /Page
+/Parent 1 0 R
+/Resources 2 0 R
+/MediaBox [0 0 595.2799999999999727 841.8899999999999864]
+/Contents 6 0 R
+>>
+endobj
+6 0 obj
+<<
+/Length 4074
+>>
+stream
+0.8503937007874016 w
+0.87 0.89 0.91 RG
+BT
+/F2 13 Tf
+14.9499999999999993 TL
+0.129 0.145 0.161 rg
+51.0236220472441033 779.5277952755905062 Td
+(Fixes) Tj
+ET
+0.69 0.49 0.09 rg
+508.6750787401573461 792.0002362204724022 m
+540.8548031496061412 792.0002362204724022 l
+542.7334410387943535 792.0002362204724022 544.2563779527557699 790.4772993065110995 544.2563779527557699 788.5986614173227736 c
+544.2563779527557699 778.3939370078740012 l
+544.2563779527557699 776.5152991186857889 542.3777400635675576 774.9923622047242588 540.8548031496061412 774.9923622047242588 c
+508.6750787401573461 774.9923622047242588 l
+506.7964408509691339 774.9923622047242588 505.2735039370077743 776.8710000939125848 505.2735039370077743 778.3939370078740012 c
+505.2735039370077743 788.5986614173227736 l
+505.2735039370077743 790.4772993065110995 507.1521418261959866 792.0002362204724022 508.6750787401573461 792.0002362204724022 c
+h
+f
+BT
+/F2 7.5 Tf
+8.625 TL
+1. g
+513.7774409448817323 779.5277952755905062 Td
+(FIXED) Tj
+ET
+0.87 0.89 0.91 RG
+0.8503937007874016 w
+51.0236220472441033 771.0238582677164914 m
+544.2563779527558836 771.0238582677164914 l
+S
+0.69 0.49 0.09 rg
+51.0236220472441033 762.5199212598424765 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 754.0159842519684616 Td
+(Local backup pruning now actually runs — keeps 3 days, never zeros out) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 739.8427559055118081 Td
+(A bug was preventing the local backup prune from executing at all, which could allow old) Tj
+T* (backup files to accumulate indefinitely. Pruning now runs correctly, retaining the most recent 3) Tj
+T* (days of backups and removing older ones. The prune summary is also returned correctly and) Tj
+T* (filename matching has been tightened.) Tj
+ET
+0.69 0.49 0.09 rg
+51.0236220472441033 681.1655905511811397 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 672.6616535433070112 Td
+(Kopia backup agent reports the real connection error) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 658.4884251968503577 Td
+(When the Kopia off-site backup agent fails to connect to the repository, it now logs the actual) Tj
+T* (reason rather than a generic exit code, making connectivity problems much easier to diagnose.) Tj
+ET
+0.69 0.49 0.09 rg
+51.0236220472441033 627.0238582677164914 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 618.5199212598424765 Td
+(Monthly export is freeze-proof and alerts when a period is missing) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 604.346692913385823 Td
+(The automated monthly export process is now protected against freezes during generation, and) Tj
+T* (exports are serialised per period to prevent conflicts. An alert is raised automatically if a) Tj
+T* (month's export is found to be missing, so nothing slips through unnoticed.) Tj
+ET
+0.69 0.49 0.09 rg
+51.0236220472441033 559.2758267716535556 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 550.7718897637795408 Td
+(Hub Backups blocks restore from incomplete snapshots) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 536.5986614173227736 Td
+(The Hub Backups page now prevents initiating a Kopia restore from an incomplete snapshot.) Tj
+T* (Only fully verified snapshots are offered for restore, eliminating the risk of pushing partial data) Tj
+T* (to a live site.) Tj
+ET
+0.87 0.89 0.91 RG
+0.8503937007874016 w
+51.0236220472441033 34.0157480314960665 m
+544.2563779527558836 34.0157480314960665 l
+S
+BT
+/F1 8 Tf
+9.1999999999999993 TL
+0.353 0.392 0.451 rg
+51.0236220472441033 19.8425196850394059 Td
+(Cardoso App · 3 July 2026) Tj
+ET
+BT
+/F1 8 Tf
+9.1999999999999993 TL
+0.353 0.392 0.451 rg
+503.6163779527558404 19.8425196850394059 Td
+(Page 2 of 2) Tj
+ET
+endstream
+endobj
+1 0 obj
+<</Type /Pages
+/Kids [3 0 R 5 0 R ]
+/Count 2
+>>
+endobj
+7 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+8 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica-Bold
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+9 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica-Oblique
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+10 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica-BoldOblique
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+11 0 obj
+<<
+/Type /Font
+/BaseFont /Courier
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+12 0 obj
+<<
+/Type /Font
+/BaseFont /Courier-Bold
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+13 0 obj
+<<
+/Type /Font
+/BaseFont /Courier-Oblique
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+14 0 obj
+<<
+/Type /Font
+/BaseFont /Courier-BoldOblique
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+15 0 obj
+<<
+/Type /Font
+/BaseFont /Times-Roman
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+16 0 obj
+<<
+/Type /Font
+/BaseFont /Times-Bold
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+17 0 obj
+<<
+/Type /Font
+/BaseFont /Times-Italic
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+18 0 obj
+<<
+/Type /Font
+/BaseFont /Times-BoldItalic
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+19 0 obj
+<<
+/Type /Font
+/BaseFont /ZapfDingbats
+/Subtype /Type1
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+20 0 obj
+<<
+/Type /Font
+/BaseFont /Symbol
+/Subtype /Type1
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+2 0 obj
+<<
+/ProcSet [/PDF /Text /ImageB /ImageC /ImageI]
+/Font <<
+/F1 7 0 R
+/F2 8 0 R
+/F3 9 0 R
+/F4 10 0 R
+/F5 11 0 R
+/F6 12 0 R
+/F7 13 0 R
+/F8 14 0 R
+/F9 15 0 R
+/F10 16 0 R
+/F11 17 0 R
+/F12 18 0 R
+/F13 19 0 R
+/F14 20 0 R
+>>
+/XObject <<
+>>
+>>
+endobj
+21 0 obj
+<<
+/Producer (jsPDF 4.2.1)
+/CreationDate (D:20260704060928-00'00')
+>>
+endobj
+22 0 obj
+<<
+/Type /Catalog
+/Pages 1 0 R
+/OpenAction [3 0 R /FitH null]
+/PageLayout /OneColumn
+>>
+endobj
+xref
+0 23
+0000000000 65535 f 
+0000012261 00000 n 
+0000014086 00000 n 
+0000000015 00000 n 
+0000000152 00000 n 
+0000007998 00000 n 
+0000008135 00000 n 
+0000012324 00000 n 
+0000012449 00000 n 
+0000012579 00000 n 
+0000012712 00000 n 
+0000012850 00000 n 
+0000012974 00000 n 
+0000013103 00000 n 
+0000013235 00000 n 
+0000013371 00000 n 
+0000013499 00000 n 
+0000013626 00000 n 
+0000013755 00000 n 
+0000013888 00000 n 
+0000013990 00000 n 
+0000014336 00000 n 
+0000014422 00000 n 
+trailer
+<<
+/Size 23
+/Root 22 0 R
+/Info 21 0 R
+/ID [ <F75198E8CB25442AF7D1B8D264294C38> <F75198E8CB25442AF7D1B8D264294C38> ]
+>>
+startxref
+14526
+%%EOF
