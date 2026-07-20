@@ -8,6 +8,8 @@
 import { HELP_CATEGORIES } from "./categories.js";
 import { gettingStartedArticles } from "./articles/getting-started.js";
 import { customersArticles } from "./articles/customers.js";
+import { inventoryArticles } from "./articles/inventory.js";
+import { reportsArticles } from "./articles/reports.js";
 
 /** @typedef {import('./types.js').HelpArticle} HelpArticle */
 /** @typedef {import('./types.js').HelpCategoryKey} HelpCategoryKey */
@@ -16,6 +18,8 @@ import { customersArticles } from "./articles/customers.js";
 export const HELP_ARTICLES = [
   ...gettingStartedArticles,
   ...customersArticles,
+  ...inventoryArticles,
+  ...reportsArticles,
 ];
 
 /** @type {Map<string, HelpArticle>} */
