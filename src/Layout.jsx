@@ -500,8 +500,9 @@ export default function Layout({ children, currentPageName }) {
   // refresh, a shared link, or browser back/forward all behave correctly.
   const [searchParams, setSearchParams] = useSearchParams();
   const settingsParam = searchParams.get("settings");
-  const settingsOpen = settingsParam != null;
   const settingsInitialTab = settingsParam || null;
+  // settingsOpen is derived below, gated on canSeeSettings, so a hand-typed
+  // ?settings=... can't mount the panel for a user without settings access.
   const openSettings = useCallback(
     (tab) => setSearchParams((prev) => { prev.set("settings", tab || "open"); return prev; }),
     [setSearchParams],
@@ -669,6 +670,12 @@ export default function Layout({ children, currentPageName }) {
     || hasPermission(currentUser, "can_access_settings")
     || hasPermission(currentUser, "can_manage_users")
     || hasPermission(currentUser, "can_manage_rules");
+
+  // Open-state for the URL-addressable settings panel. Gated on canSeeSettings:
+  // every normal entry point is already hidden behind that flag, and this stops
+  // a hand-typed / shared ?settings=... URL from mounting SettingsPanel (and
+  // firing its permission-gated API calls) for a user who can't see settings.
+  const settingsOpen = settingsParam != null && canSeeSettings;
 
   // Per-user load + first-time seed for the sidebar group collapsed
   // state. Reacts to currentUser.id changing — so switching accounts
