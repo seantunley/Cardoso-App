@@ -1,4 +1,4 @@
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   Settings,
   LogOut,
@@ -346,7 +346,7 @@ import HealthStrip from "@/components/HealthStrip";
 import SidebarHelpSettings from "@/components/SidebarHelpSettings";
 import { buildSettingsTabGroups } from "@/components/settings/settingsTabs";
 import NotificationsBell from "@/components/NotificationsBell";
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/lib/AuthContext";
 import { useAppInfo, useHubMode } from "@/lib/useAppInfo";
 import { hasPermission } from "@/lib/permissions";
@@ -438,8 +438,11 @@ export default function Layout({ children, currentPageName }) {
   const { isSuccess: appInfoResolved } = useAppInfo();
   const [cmdOpen, setCmdOpen]               = useState(false);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen]     = useState(false);
-  const [settingsInitialTab, setSettingsInitialTab] = useState(null);
+  // Settings open-state is URL-addressable: ?settings=<tabId> opens the panel
+  // at that tab and survives a refresh / can be shared. ?settings=open just
+  // opens it at the default tab (SettingsPanel ignores an unknown initialTab
+  // and falls back to its first tab). Derived below, after currentUser is in
+  // scope; see openSettings/closeSettings.
 
   // Sidebar group open/closed state. Per-user; loaded lazily by the
   // useEffect below once currentUser.id is known. Starts empty (all
@@ -471,6 +474,25 @@ export default function Layout({ children, currentPageName }) {
 
   const { user: currentUser, logout } = useAuth();
   const isAdmin = currentUser?.role === "admin";
+
+  // URL-addressable settings. The ?settings query param is the single source
+  // of truth for whether the panel is open and which tab it lands on, so a
+  // refresh, a shared link, or browser back/forward all behave correctly.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const settingsParam = searchParams.get("settings");
+  const settingsInitialTab = settingsParam || null;
+  // settingsOpen is derived below, gated on canSeeSettings, so a hand-typed
+  // ?settings=... can't mount the panel for a user without settings access.
+  const openSettings = useCallback(
+    (tab) => setSearchParams((prev) => { prev.set("settings", tab || "open"); return prev; }),
+    [setSearchParams],
+  );
+  const closeSettings = useCallback(
+    // replace: closing shouldn't leave a history entry that reopens settings
+    // when the user hits Back.
+    () => setSearchParams((prev) => { prev.delete("settings"); return prev; }, { replace: true }),
+    [setSearchParams],
+  );
 
   // Single theme toggler — used by the collapsed sidebar, the expanded
   // sidebar footer, the mobile header, AND the command palette. Was three
@@ -529,13 +551,10 @@ export default function Layout({ children, currentPageName }) {
   // jump straight to a specific section (e.g. the Price List page links
   // to its exclusions tab). Detail: { tab?: string }.
   useEffect(() => {
-    const handler = (e) => {
-      setSettingsInitialTab(e?.detail?.tab || null);
-      setSettingsOpen(true);
-    };
+    const handler = (e) => openSettings(e?.detail?.tab || undefined);
     window.addEventListener("open-settings", handler);
     return () => window.removeEventListener("open-settings", handler);
-  }, []);
+  }, [openSettings]);
 
   // Sage health poll — site mode only, only for users who can see BAT
   // (otherwise we'd be making a permission-gated API call that 403s on
@@ -631,6 +650,12 @@ export default function Layout({ children, currentPageName }) {
     || hasPermission(currentUser, "can_access_settings")
     || hasPermission(currentUser, "can_manage_users")
     || hasPermission(currentUser, "can_manage_rules");
+
+  // Open-state for the URL-addressable settings panel. Gated on canSeeSettings:
+  // every normal entry point is already hidden behind that flag, and this stops
+  // a hand-typed / shared ?settings=... URL from mounting SettingsPanel (and
+  // firing its permission-gated API calls) for a user who can't see settings.
+  const settingsOpen = settingsParam != null && canSeeSettings;
 
   // Per-user load + first-time seed for the sidebar group collapsed
   // state. Reacts to currentUser.id changing — so switching accounts
@@ -906,7 +931,7 @@ export default function Layout({ children, currentPageName }) {
             collapsed={isCollapsed}
             canSeeSettings={canSeeSettings}
             settingsGroups={buildSettingsTabGroups({ currentUser, hubMode })}
-            onOpenSettingsTab={(tabId) => { setSettingsInitialTab(tabId); setSettingsOpen(true); }}
+            onOpenSettingsTab={(tabId) => openSettings(tabId)}
             onOpenCommandPalette={() => setCmdOpen(true)}
             appVersion={versionStatus.currentVersion}
           />
@@ -914,7 +939,7 @@ export default function Layout({ children, currentPageName }) {
           {isCollapsed ? (
             <>
               {canSeeSettings && (
-                <SidebarButton onClick={() => setSettingsOpen(true)} icon={Settings} label="Settings" collapsed />
+                <SidebarButton onClick={() => openSettings()} icon={Settings} label="Settings" collapsed />
               )}
               <SidebarButton
                 onClick={toggleTheme}
@@ -964,7 +989,7 @@ export default function Layout({ children, currentPageName }) {
                   <DropdownMenuLabel className="truncate">{currentUser?.email || "Signed in"}</DropdownMenuLabel>
                   <DropdownMenuSeparator />
                   {canSeeSettings && (
-                    <DropdownMenuItem onClick={() => setSettingsOpen(true)}>
+                    <DropdownMenuItem onClick={() => openSettings()}>
                       <Settings className="mr-2 h-4 w-4" /> Settings
                     </DropdownMenuItem>
                   )}
@@ -1024,7 +1049,7 @@ export default function Layout({ children, currentPageName }) {
         </div>
         <div className="flex items-center gap-1">
           {canSeeSettings && (
-            <Button variant="ghost" size="icon" onClick={() => setSettingsOpen(true)}><Settings className="h-5 w-5 text-amber-400" /></Button>
+            <Button variant="ghost" size="icon" onClick={() => openSettings()}><Settings className="h-5 w-5 text-amber-400" /></Button>
           )}
           <Button variant="ghost" size="icon" onClick={toggleTheme} title={theme === 'dark' ? 'Light Mode' : 'Dark Mode'}>
             {theme === 'dark' ? <Sun className="h-5 w-5 text-accent" /> : <Moon className="h-5 w-5 text-muted-foreground" />}
@@ -1079,7 +1104,7 @@ export default function Layout({ children, currentPageName }) {
         <Suspense fallback={null}>
           <SettingsPanel
             open={settingsOpen}
-            onClose={() => { setSettingsOpen(false); setSettingsInitialTab(null); }}
+            onClose={closeSettings}
             hubMode={hubMode}
             initialTab={settingsInitialTab}
           />
@@ -1102,7 +1127,7 @@ export default function Layout({ children, currentPageName }) {
             heading: "Actions",
             items: [
               { id: "action:theme", name: theme === 'dark' ? "Switch to light mode" : "Switch to dark mode", icon: theme === 'dark' ? Sun : Moon, run: toggleTheme },
-              canSeeSettings && { id: "action:settings", name: "Open Settings", icon: Settings, run: () => setSettingsOpen(true) },
+              canSeeSettings && { id: "action:settings", name: "Open Settings", icon: Settings, run: () => openSettings() },
               { id: "action:password", name: "Change password", icon: KeyRound, run: () => setChangePasswordOpen(true) },
               { id: "action:logout", name: "Log out", icon: LogOut, run: () => logout(true) },
             ].filter(Boolean),
@@ -1115,7 +1140,7 @@ export default function Layout({ children, currentPageName }) {
                 name: `Settings › ${t.label}`,
                 keywords: g.name,
                 icon: Settings,
-                run: () => { setSettingsInitialTab(t.id); setSettingsOpen(true); },
+                run: () => openSettings(t.id),
               }))
             ),
           },
