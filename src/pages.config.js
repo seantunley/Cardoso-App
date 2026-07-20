@@ -78,6 +78,7 @@ const MonthlySalesFigures = React.lazy(() => import('./pages/MonthlySalesFigures
 const Trends = React.lazy(() => import('./pages/Trends'));
 const CreditorSummary = React.lazy(() => import('./pages/CreditorSummary'));
 const CreditorSearch = React.lazy(() => import('./pages/CreditorSearch'));
+const Help = React.lazy(() => import('./pages/Help'));
 
 
 export const PAGES = {
@@ -113,6 +114,7 @@ export const PAGES = {
     "MonthlySalesFigures": MonthlySalesFigures,
     "CreditorSummary": CreditorSummary,
     "CreditorSearch": CreditorSearch,
+    "Help": Help,
 }
 
 export const pagesConfig = {

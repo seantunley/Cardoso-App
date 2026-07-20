@@ -138,7 +138,10 @@ export default function Login() {
 
   useEffect(() => {
     if (!isLoadingAuth && isAuthenticated) {
-      const redirectTo = location.state?.from?.pathname || "/";
+      // Preserve the full target location (search + hash), not just the path,
+      // so deep links like /Help?article=welcome survive the login redirect.
+      const from = location.state?.from;
+      const redirectTo = from ? `${from.pathname}${from.search || ""}${from.hash || ""}` : "/";
       navigate(redirectTo, { replace: true });
     }
   }, [isAuthenticated, isLoadingAuth, location.state, navigate]);
@@ -159,7 +162,10 @@ export default function Login() {
       setIsSubmitting(true);
       const user = await login(formData.email, formData.password);
       if (!user) return;
-      const redirectTo = location.state?.from?.pathname || "/";
+      // Preserve the full target location (search + hash), not just the path,
+      // so deep links like /Help?article=welcome survive the login redirect.
+      const from = location.state?.from;
+      const redirectTo = from ? `${from.pathname}${from.search || ""}${from.hash || ""}` : "/";
       navigate(redirectTo, { replace: true });
     } catch (error) {
       setLocalError(error.message || "Authentication failed.");
