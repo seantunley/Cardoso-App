@@ -86,7 +86,7 @@ A Cardoso install runs in one of two modes. You set the mode by setting the `HUB
 | **Default landing page** | Customer Search | Hub Dashboard |
 | **Settings tabs visible** | Connections, Audit Log, TLS, Maintenance, Reconciliation, Updates | TLS, Sync Log, Hub Maintenance, Network, Updates |
 | **Operations tabs visible** | Job Runs, System Log, Security, Updates | Job Runs, System Log, Security, Updates, Hub Sync Log |
-| **Pages visible** | most non-hub pages | Hub Dashboard, Hub Metrics, Hub Trends, Hub Audit Log, Hub Backups, Hub Reconciliation, plus a few shared like Inventory + Network Devices |
+| **Pages visible** | most non-hub pages | Hub Dashboard, Hub Metrics, Hub Trends, Hub Audit Log, Hub Backups, Hub Reconciliation, plus a few shared like Inventory |
 
 A user with the `hub_redirect` flag set who logs in at a site is silently bounced to the hub via a 5-minute JWT — they never see the site UI. This is how head-office staff get to the right view automatically.
 
@@ -428,7 +428,6 @@ Tabs change based on mode + permissions:
 | **Updates** | admin | Same as Operations → Updates. |
 | **Sync Log** | hub | Hub sync event list. |
 | **Hub Maintenance** | hub + admin | Hub-side dedupe; site management; orphan sites + Forget. |
-| **Network** | hub + admin | ntopng integration settings. |
 | **Reconciliation** | admin | OCR keys, invoice digit length, OCR pause, reset queue, replicate supplier. |
 | **Accounting** | admin | VAT % (default 15). Used by reconciliation variance detection. |
 
@@ -954,7 +953,6 @@ Set in `.env` at the install root. Restart the service after changes.
 | `SUPER_ADMIN` | Username (or user_id) of the un-deletable super-admin user. | none |
 | `HUB_SHARED_SECRET` | HMAC for hub-internal endpoints (used by some hub→site control RPCs). | none |
 | `HUB_POSTGRES_*` | Phase 2 hub Postgres scaffold. SQLite is still authoritative. Leave defaults. | various |
-| `NTOPNG_URL` / `_USER` / `_PASSWORD` | Network monitoring (hub only). Can also be set via Hub Settings UI. | none |
 
 ---
 

@@ -438,7 +438,7 @@ async function ocrViaGoogleVision(imageBuffer, apiKey) {
   // Send the API key as a header instead of a query string. Earlier the
   // call was `...?key=${apiKey}` which leaks the credential into anything
   // that captures full URLs along the path (proxy access logs, Tailscale
-  // flow records, ntopng, error stacks that include the request URL).
+  // flow records, error stacks that include the request URL).
   // `X-Goog-API-Key` is the documented header form for the same auth.
   const res = await fetchWithTimeout('https://vision.googleapis.com/v1/images:annotate', {
     method: 'POST',

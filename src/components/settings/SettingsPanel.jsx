@@ -24,7 +24,6 @@ import HubMaintenanceTab from "@/components/settings/tabs/HubMaintenanceTab";
 import CreditLogicTab from "@/components/settings/tabs/CreditLogicTab";
 import AccountingTab from "@/components/settings/tabs/AccountingTab";
 import ReconciliationSettingsTab from "@/components/settings/tabs/ReconciliationSettingsTab";
-import NtopngTab from "@/components/settings/tabs/NtopngTab";
 import TlsTab from "@/components/settings/tabs/TlsTab";
 import { buildSettingsTabGroups } from "@/components/settings/settingsTabs";
 import UsersTabContent from "@/components/settings/tabs/UsersTabContent";
@@ -156,7 +155,6 @@ export default function SettingsPanel({ open, onClose, hubMode, initialTab }) {
               {activeTab === "maintenance" && <MaintenanceTab />}
               {activeTab === "dr" && <DisasterRecoveryWizard />}
               {activeTab === "hubmaintenance" && <HubMaintenanceTab />}
-              {activeTab === "network" && <NtopngTab />}
               {activeTab === "reconciliation" && <ReconciliationSettingsTab />}
               {activeTab === "forecast" && <ForecastSettingsTab />}
               {activeTab === "pricelist" && <PriceListSettingsTab />}
