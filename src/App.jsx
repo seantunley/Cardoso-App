@@ -1,4 +1,4 @@
-import { Suspense } from "react";
+import { Suspense, lazy } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as SonnerToaster } from "@/components/ui/sonner";
 import { useHubMode } from "@/lib/useAppInfo";
@@ -21,6 +21,10 @@ const { Pages, Layout, mainPage } = pagesConfig;
 const mainPageKey = mainPage ?? Object.keys(Pages)[0];
 const MainPage = mainPageKey ? Pages[mainPageKey] : () => <></>;
 const HubDashboard = Pages["HubDashboard"];
+// The printable manual is deliberately NOT a pages.config page: it renders
+// OUTSIDE the sidebar layout (its own top-level route below) so the printout
+// has no app chrome. Lazy so its bundle only loads when someone opens it.
+const Manual = lazy(() => import("./pages/Manual"));
 const pagePermissions = {
   CustomerSearch: "can_access_customer_search",
   CustomerBalances: "can_access_customer_balances",
@@ -184,6 +188,18 @@ const AuthenticatedApp = () => {
           />
         ))}
       </Route>
+
+      {/* Printable manual — outside the layout route so it renders with no
+          sidebar/chrome (clean print/PDF). Auth-gated but permission-open,
+          same as the in-app Help centre. */}
+      <Route
+        path="/manual"
+        element={
+          <ProtectedRoute>
+            <Manual />
+          </ProtectedRoute>
+        }
+      />
 
       <Route path="*" element={<PageNotFound />} />
     </Routes>
