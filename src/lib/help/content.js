@@ -7,7 +7,6 @@
 
 import { HELP_CATEGORIES } from "./categories.js";
 import { gettingStartedArticles } from "./articles/getting-started.js";
-import { hubBackupsArticles } from "./articles/hub-backups.js";
 
 /** @typedef {import('./types.js').HelpArticle} HelpArticle */
 /** @typedef {import('./types.js').HelpCategoryKey} HelpCategoryKey */
@@ -15,7 +14,6 @@ import { hubBackupsArticles } from "./articles/hub-backups.js";
 /** @type {HelpArticle[]} */
 export const HELP_ARTICLES = [
   ...gettingStartedArticles,
-  ...hubBackupsArticles,
 ];
 
 /** @type {Map<string, HelpArticle>} */
