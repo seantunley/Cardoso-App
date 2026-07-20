@@ -10,6 +10,7 @@ import { gettingStartedArticles } from "./articles/getting-started.js";
 import { customersArticles } from "./articles/customers.js";
 import { inventoryArticles } from "./articles/inventory.js";
 import { reportsArticles } from "./articles/reports.js";
+import { adminArticles } from "./articles/admin.js";
 
 /** @typedef {import('./types.js').HelpArticle} HelpArticle */
 /** @typedef {import('./types.js').HelpCategoryKey} HelpCategoryKey */
@@ -20,6 +21,7 @@ export const HELP_ARTICLES = [
   ...customersArticles,
   ...inventoryArticles,
   ...reportsArticles,
+  ...adminArticles,
 ];
 
 /** @type {Map<string, HelpArticle>} */
