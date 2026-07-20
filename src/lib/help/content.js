@@ -10,6 +10,7 @@ import { gettingStartedArticles } from "./articles/getting-started.js";
 import { customersArticles } from "./articles/customers.js";
 import { inventoryArticles } from "./articles/inventory.js";
 import { reportsArticles } from "./articles/reports.js";
+import { reconciliationArticles } from "./articles/reconciliation.js";
 import { adminArticles } from "./articles/admin.js";
 
 /** @typedef {import('./types.js').HelpArticle} HelpArticle */
@@ -21,6 +22,7 @@ export const HELP_ARTICLES = [
   ...customersArticles,
   ...inventoryArticles,
   ...reportsArticles,
+  ...reconciliationArticles,
   ...adminArticles,
 ];
 
