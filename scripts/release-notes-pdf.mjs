@@ -1625,6 +1625,82 @@ const RELEASES = {
   ],
   },
 
+  '2026-07-20': {
+    product: 'Cardoso App',
+    title: 'Product Update',
+    date: '20 July 2026',
+    slug: '20-July-2026',
+    intro:
+      "This update delivers a built-in Help Centre across every module — " +
+      "searchable articles for Customers, Inventory, Reports, Creditors, BAT " +
+      "Reconciliation, Administration, and Hub & Backups — with a sidebar shortcut " +
+      "that puts help and settings one click away from wherever you are in the app. " +
+      "The full user manual can be printed or saved as a PDF directly from " +
+      "/manual. Head-office users gain new tools on the Hub Backups page: a " +
+      "per-site indicator confirms SQL database backups have reached the off-site " +
+      "repository, snapshot trees can be browsed in the app, and snapshots can be " +
+      "deleted or maintenance run from the viewer without leaving Cardoso.",
+    sections: [
+      {
+        label: 'NEW',
+        heading: 'New Features',
+        items: [
+          {
+            title: 'Built-in Help Centre with articles for every module',
+            body:
+              "A full Help Centre is now available inside the app. Articles cover " +
+              "every module — Customers, Inventory & Reports, Administration, BAT " +
+              "Reconciliation, Creditors, and Hub & Backups — and can be searched " +
+              "by keyword. Find answers without leaving the page you are working on.",
+          },
+          {
+            title: 'Help and Settings accessible from the sidebar',
+            body:
+              "A Help flyout and a Settings flyout are now reachable from icons in " +
+              "the sidebar, so you can look something up or adjust a setting from " +
+              "anywhere in the app without navigating away from your current screen.",
+          },
+          {
+            title: 'Printable user manual at /manual',
+            body:
+              "The complete user manual is available at /manual as a single " +
+              "print-ready page. Print a reference copy or save it as a PDF to " +
+              "share with your team.",
+          },
+          {
+            title: 'Settings tabs are bookmarkable and shareable',
+            body:
+              "Settings panels can now be deep-linked using ?settings=<tab> in " +
+              "the address bar. Bookmark a specific settings section or share a " +
+              "direct link to it with a colleague.",
+          },
+          {
+            title: 'Verify SQL backups reached the off-site hub, and manage snapshots',
+            body:
+              "The Hub Backups fleet table now shows a per-site indicator " +
+              "confirming whether each site's SQL database backup has been " +
+              "uploaded to the off-site repository. Snapshot trees can be browsed " +
+              "directly in the viewer, and you can delete individual off-site " +
+              "snapshots or trigger repository maintenance without leaving Cardoso.",
+          },
+        ],
+      },
+      {
+        label: 'FIXED',
+        heading: 'Fixes',
+        items: [
+          {
+            title: 'Sidebar navigation is cleaner',
+            body:
+              "The subsystem health strip has been removed from the sidebar, " +
+              "keeping the navigation uncluttered. System status and backup health " +
+              "remain available on the dedicated Hub Backups page.",
+          },
+        ],
+      },
+    ],
+  },
+
   '2026-07-03': {
     product: 'Cardoso App',
     title: 'Product Update',
