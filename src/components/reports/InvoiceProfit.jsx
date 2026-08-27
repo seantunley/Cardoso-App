@@ -196,8 +196,11 @@ function DocumentLines({ doc, colSpan }) {
 const PERIOD_LABEL = { day: 'Day', week: 'Week', month: 'Month', year: 'Year' };
 const PERIOD_KEYS = Object.keys(PERIOD_LABEL);
 
-function HubPeriods({ data, periodType, onPeriodType }) {
-  const [open, setOpen] = useState({});
+// `open`/`setOpen` are owned by the parent, not held here: printing has to be
+// able to expand every period first, exactly as the site path does. Branch rows
+// only exist in the DOM while their period is open, so a collapsed hub view
+// printed consolidated totals with an empty Branch column.
+function HubPeriods({ data, periodType, onPeriodType, open, setOpen }) {
   const periods = data?.periods || [];
   const totals = data?.totals;
 
@@ -230,7 +233,10 @@ function HubPeriods({ data, periodType, onPeriodType }) {
           because the numbers look complete. */}
       {!!data?.stale_branches?.length && (
         <div
-          className="report-print-hide mb-4 px-4 py-2.5 text-sm"
+          // NOT report-print-hide: a printout that drops this shows understated
+          // totals under a header claiming every branch. The warning has to
+          // travel with the paper.
+          className="mb-4 px-4 py-2.5 text-sm"
           style={{ border: '1px solid var(--phosphor)', borderRadius: '12px', background: 'hsla(33, 95%, 55%, 0.06)' }}
         >
           <span className="font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: 'var(--phosphor)' }}>Stale</span>{' '}
@@ -249,7 +255,8 @@ function HubPeriods({ data, periodType, onPeriodType }) {
           understating the group. Name them. */}
       {!!data?.missing_branches?.length && (
         <div
-          className="report-print-hide mb-4 px-4 py-2.5 text-sm"
+          // NOT report-print-hide — see the stale notice above.
+          className="mb-4 px-4 py-2.5 text-sm"
           style={{ border: '1px solid hsl(var(--status-critical))', borderRadius: '12px', background: 'hsl(var(--status-critical) / 0.06)' }}
         >
           <span className="font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: 'hsl(var(--status-critical))' }}>Incomplete</span>{' '}
@@ -410,6 +417,8 @@ export default function InvoiceProfit() {
   // which is open for a month when the range covers only one.
   const [expanded, setExpanded] = useState({});
   const toggle = (k) => setExpanded((s) => ({ ...s, [k]: !(k in s ? s[k] : false) }));
+  // Hub period expansion, held here for the same reason: print expands it.
+  const [hubOpen, setHubOpen] = useState({});
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['invoice-profit', from, to, filter.mode, filter.min, filter.max, filter.unit, periodType],
@@ -479,6 +488,15 @@ export default function InvoiceProfit() {
   // unexpanded levels are simply not in the DOM. Invoice LINE detail stays shut:
   // that is a deliberate lookup, not part of the report.
   const printAll = () => {
+    if (isHub) {
+      // Same fix as the site tree: open every period so the branch rows exist
+      // when the print dialog snapshots the page.
+      const openPeriods = {};
+      for (const p of data?.periods || []) openPeriods[p.period_key] = true;
+      setHubOpen(openPeriods);
+      requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
+      return;
+    }
     const open = {};
     for (const m of months) {
       open[m.month] = true;
@@ -520,7 +538,7 @@ export default function InvoiceProfit() {
       onExportCsv={!isHub && months.length ? exportCsv : undefined}
       onExportExcel={!isHub && months.length ? exportExcel : undefined}
       onExportPdf={!isHub && months.length ? exportPdf : undefined}
-      onPrint={isHub ? () => window.print() : printAll}
+      onPrint={printAll}
       isLoading={isLoading}
       error={error?.message}
       printHeader={
@@ -531,14 +549,24 @@ export default function InvoiceProfit() {
           // with the component's default current-month range produced a
           // multi-year printout whose header claimed one month.
           period={isHub ? hubPrintPeriod : `${from} to ${to}`}
-          filters={[isHub ? 'All branches · totals only' : 'Ex-VAT, in Rand (R)', 'Credit notes netted off', 'Inter-branch transfers excluded']}
+          filters={[
+            isHub
+              // Say the coverage, don't assert completeness: "All branches" on a
+              // printout covering 1 of 6 is the whole problem.
+              ? (data?.branches_expected
+                ? `${data.branches_reporting} of ${data.branches_expected} branches · totals only`
+                : 'Totals only')
+              : 'Ex-VAT, in Rand (R)',
+            'Credit notes netted off',
+            'Inter-branch transfers excluded',
+          ]}
           generatedAt={generatedAtFmt}
         />
       }
       printFooter={<PrintFooter note="Invoice Profit · Cardoso · Confidential — contains cost and margin" />}
     >
       {isHub ? (
-        <HubPeriods data={data} periodType={periodType} onPeriodType={setPeriodType} />
+        <HubPeriods data={data} periodType={periodType} onPeriodType={setPeriodType} open={hubOpen} setOpen={setHubOpen} />
       ) : (
       <>
       <div className="report-print-hide mb-4 flex flex-wrap items-center gap-4">
