@@ -1,4 +1,4 @@
-import { useState, Fragment } from 'react';
+import { useState, useMemo, Fragment } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -194,6 +194,7 @@ function DocumentLines({ doc, colSpan }) {
 // invoices live at the branch that raised them, so each branch row links
 // straight into that branch's own report on this period's dates.
 const PERIOD_LABEL = { day: 'Day', week: 'Week', month: 'Month', year: 'Year' };
+const PERIOD_KEYS = Object.keys(PERIOD_LABEL);
 
 function HubPeriods({ data, periodType, onPeriodType }) {
   const [open, setOpen] = useState({});
@@ -216,11 +217,32 @@ function HubPeriods({ data, periodType, onPeriodType }) {
           ))}
         </div>
         {data?.last_synced_at && (
+          // The OLDEST contributing branch sync, not the newest: the figures are
+          // only as fresh as the branch that last updated.
           <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-subtle">
             synced {new Date(data.last_synced_at).toLocaleString('en-ZA', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
           </span>
         )}
       </div>
+
+      {/* A branch that HAS synced before but has since fallen behind still
+          contributes — with stale figures. Silence there is worse than absence,
+          because the numbers look complete. */}
+      {!!data?.stale_branches?.length && (
+        <div
+          className="report-print-hide mb-4 px-4 py-2.5 text-sm"
+          style={{ border: '1px solid var(--phosphor)', borderRadius: '12px', background: 'hsla(33, 95%, 55%, 0.06)' }}
+        >
+          <span className="font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: 'var(--phosphor)' }}>Stale</span>{' '}
+          <span className="text-foreground">
+            {data.stale_branches.map((b) => `${b.site_name} (${new Date(b.synced_at).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short' })})`).join(', ')}
+            {' '}{data.stale_branches.length === 1 ? 'has' : 'have'} not synced in over a day.
+          </span>{' '}
+          <span className="text-muted-foreground">
+            Their figures below are from that last sync, so recent periods understate them. Check Hub → Sync Log.
+          </span>
+        </div>
+      )}
 
       {/* A branch that has never synced contributes nothing to the totals below.
           Left unsaid, the report reads as "every branch" while quietly
@@ -330,43 +352,47 @@ const Chevron = ({ open }) => (
 );
 
 export default function InvoiceProfit() {
-  // Dates live in the URL so the hub's "invoices →" link can hand a branch an
-  // exact period, and so a filtered view can be shared or bookmarked.
+  // THE URL IS THE STATE. Dates, hub period and filter are all read from
+  // searchParams on every render rather than copied into useState.
+  //
+  // useState initialisers run once. Mirroring the query string into local state
+  // meant that anything changing the URL while this component stayed mounted —
+  // Saved Views applying a different Invoice Profit view, or the browser's back
+  // button between two views of this same report — moved the URL while the
+  // controls, and the query React Query actually sent, stayed on the old view.
+  // Deriving instead makes that impossible: there is one copy of the truth and
+  // it is the one in the address bar.
   const [searchParams, setSearchParams] = useSearchParams();
   const isDate = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
-  const [from, setFromState] = useState(() => (isDate(searchParams.get('from')) ? searchParams.get('from') : monthStartISO()));
-  const [to, setToState] = useState(() => (isDate(searchParams.get('to')) ? searchParams.get('to') : todayISO()));
-  const putParam = (key, value) => setSearchParams((prev) => {
-    const next = new URLSearchParams(prev);
-    next.set(key, value);
-    return next;
-  }, { replace: true });
-  const setFrom = (v) => { setFromState(v); putParam('from', v); };
-  const setTo = (v) => { setToState(v); putParam('to', v); };
-  // Hub only: which period bucket the totals table shows.
-  const [periodType, setPeriodTypeState] = useState(() => searchParams.get('period') || 'month');
-  const setPeriodType = (v) => { setPeriodTypeState(v); putParam('period', v); };
-  // mode: 'all' | 'losses' | 'range'. The range bounds are inclusive and read
-  // either as rand of profit or as margin %, per `unit`.
-  //
-  // Held in the URL, like the dates. Saved Views stores nothing but the query
-  // string, so a filter kept only in component state meant saving "the invoices
-  // that lost money in July" and getting back all of July — and a pasted link
-  // carrying ?losses=1 was ignored on arrival.
-  const [filter, setFilter] = useState(() => {
+
+  const from = isDate(searchParams.get('from')) ? searchParams.get('from') : monthStartISO();
+  const to = isDate(searchParams.get('to')) ? searchParams.get('to') : todayISO();
+  const periodType = PERIOD_KEYS.includes(searchParams.get('period')) ? searchParams.get('period') : 'month';
+
+  const filter = useMemo(() => {
     const losses = ['1', 'true', 'yes', 'on'].includes(String(searchParams.get('losses') || '').toLowerCase());
     const min = searchParams.get('min') ?? '';
     const max = searchParams.get('max') ?? '';
     const unit = searchParams.get('unit') === 'pct' ? 'pct' : 'rand';
     const mode = losses ? 'losses' : (min !== '' || max !== '') ? 'range' : 'all';
     return { mode, min, max, unit };
-  });
-  const setF = (patch) => setFilter((f) => {
-    const next = { ...f, ...patch };
+  }, [searchParams]);
+
+  const putParam = (key, value) => setSearchParams((prev) => {
+    const next = new URLSearchParams(prev);
+    next.set(key, value);
+    return next;
+  }, { replace: true });
+  const setFrom = (v) => putParam('from', v);
+  const setTo = (v) => putParam('to', v);
+  const setPeriodType = (v) => putParam('period', v);
+
+  const setF = (patch) => {
+    const next = { ...filter, ...patch };
     setSearchParams((prev) => {
       const q = new URLSearchParams(prev);
-      // Rewrite the whole filter each time: switching to "all" has to CLEAR the
-      // old bounds, or a stale ?max= would keep filtering invisibly.
+      // Rewrite the whole filter each time: switching back to "all" has to CLEAR
+      // the old bounds, or a stale ?max= would keep filtering invisibly.
       for (const k of ['losses', 'min', 'max', 'unit']) q.delete(k);
       if (next.mode === 'losses') q.set('losses', '1');
       if (next.mode === 'range') {
@@ -376,8 +402,8 @@ export default function InvoiceProfit() {
       }
       return q;
     }, { replace: true });
-    return next;
-  });
+  };
+
   // Expansion state keyed by month/week/day id. Everything below a month starts
   // closed — a month of invoices is thousands of rows, and rendering them all up
   // front makes the report unusable. A key absent from the map means "default",
@@ -468,6 +494,16 @@ export default function InvoiceProfit() {
     requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
   };
 
+  // What the hub actually returned, for the print header: the period type and
+  // the span from the oldest bucket's start to the newest bucket's end.
+  const hubPrintPeriod = (() => {
+    const ps = data?.periods || [];
+    if (!ps.length) return `${PERIOD_LABEL[periodType] || 'Period'} totals`;
+    const starts = ps.map((x) => x.period_start).filter(Boolean).sort();
+    const ends = ps.map((x) => x.period_end).filter(Boolean).sort();
+    return `${PERIOD_LABEL[periodType] || 'Period'} totals · ${starts[0]} to ${ends[ends.length - 1]} · ${ps.length} ${ps.length === 1 ? 'period' : 'periods'}`;
+  })();
+
   const generatedAtFmt = new Date().toLocaleString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   // A single month is open by default; with several in range they all start
   // closed so the page opens on month totals rather than a wall of weeks.
@@ -490,7 +526,11 @@ export default function InvoiceProfit() {
       printHeader={
         <PrintHeader
           title="Invoice Profit"
-          period={`${from} to ${to}`}
+          // The hub ignores from/to and returns its own recent period buckets
+          // (up to 24 months), with the date controls hidden — labelling that
+          // with the component's default current-month range produced a
+          // multi-year printout whose header claimed one month.
+          period={isHub ? hubPrintPeriod : `${from} to ${to}`}
           filters={[isHub ? 'All branches · totals only' : 'Ex-VAT, in Rand (R)', 'Credit notes netted off', 'Inter-branch transfers excluded']}
           generatedAt={generatedAtFmt}
         />

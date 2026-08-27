@@ -898,14 +898,35 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     }, { selling: 0, cost: 0, profit: 0, invoice_count: 0, credit_note_count: 0 });
     totals.margin = margin(totals.profit, totals.selling);
 
-    const synced = [...bySite.values()].map((x) => x.synced_at).filter(Boolean).sort();
+    // FRESHNESS IS PER BRANCH, and the headline figure is the OLDEST of them.
+    //
+    // Counting a branch as "reporting" because it holds any historical row, then
+    // showing the NEWEST sync time across all branches, let a branch quietly stop
+    // syncing: its stale figures kept contributing to the current period while
+    // another branch's successful sync painted a fresh timestamp over the top and
+    // no warning appeared anywhere. Reporting the oldest contributing sync can
+    // only ever understate freshness, which is the safe direction.
+    const syncTimes = [...bySite.values()].map((x) => x.synced_at).filter(Boolean).sort();
+    const newestSync = syncTimes[syncTimes.length - 1] || null;
+    const oldestSync = syncTimes[0] || null;
+    // A branch is stale when it is more than a day behind the freshest branch:
+    // every branch is pulled on the same cycle, so that means it missed one.
+    const STALE_MS = 24 * 60 * 60 * 1000;
+    const staleBranches = newestSync
+      ? [...bySite.values()]
+        .filter((x) => x.synced_at && (Date.parse(newestSync) - Date.parse(x.synced_at)) > STALE_MS)
+        .map((x) => ({ site_name: x.site_name, synced_at: x.synced_at }))
+      : [];
     return {
       hub_mode: true,
       period_type: periodType,
       periods,
       totals: periods.length ? totals : null,
       filters: { sites, period_types: PERIOD_TYPES },
-      last_synced_at: synced[synced.length - 1] || null,
+      // Deliberately the oldest, not the newest — see above.
+      last_synced_at: oldestSync,
+      newest_synced_at: newestSync,
+      stale_branches: staleBranches,
       // Coverage, stated rather than implied. branches_expected counts the
       // branches this user may see; missing_branches are the ones contributing
       // nothing to the figures above.
