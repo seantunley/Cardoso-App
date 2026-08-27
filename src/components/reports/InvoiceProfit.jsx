@@ -1,7 +1,7 @@
 import { useState, Fragment } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ReportFrame, PrintHeader, PrintFooter, fmtR, fmtCount, downloadCsv, downloadReport } from './lib';
+import { ReportFrame, PrintHeader, PrintFooter, fmtRSigned, fmtCount, downloadCsv, downloadReport } from './lib';
 
 // Invoice Profit — every invoice's selling, cost and profit, nested
 // Month → ISO Week → Day → invoice, with a to-date strip across the top.
@@ -31,11 +31,15 @@ function fetchProfit(from, to) {
 // Profit and margin read red below zero — a loss-making day should be obvious
 // at a glance, not something you have to spot the minus sign for.
 const toneFor = (v) => (v < 0 ? 'text-red-400' : v > 0 ? 'text-emerald-500' : 'text-muted-foreground');
+// fmtRSigned, NOT fmtR: fmtR takes Math.abs() (right for reports whose values
+// are always positive, wrong here). Credit notes carry negative selling and cost,
+// and a day can net to a loss — printing those without the minus sign turns a
+// R111 loss into a R111 gain on screen.
 const Money = ({ v, bold }) => (
-  <span className={`tabular-nums ${bold ? 'font-semibold' : ''}`}><span className="text-muted-subtle">R </span>{fmtR(v)}</span>
+  <span className={`tabular-nums ${bold ? 'font-semibold' : ''}`}><span className="text-muted-subtle">R </span>{fmtRSigned(v)}</span>
 );
 const Profit = ({ v, bold }) => (
-  <span className={`tabular-nums ${toneFor(v)} ${bold ? 'font-semibold' : ''}`}><span className="opacity-60">R </span>{fmtR(v)}</span>
+  <span className={`tabular-nums ${toneFor(v)} ${bold ? 'font-semibold' : ''}`}><span className="opacity-60">R </span>{fmtRSigned(v)}</span>
 );
 // Margin is toned by the PROFIT, not by its own sign. A credit note has negative
 // profit but a positive margin (it reverses a sale that carried one), and showing
@@ -297,7 +301,7 @@ export default function InvoiceProfit() {
           {!!excluded?.count && (
             <p className="text-xs text-muted-foreground">
               Excluded {fmtCount(excluded.count)} inter-branch transfer {excluded.count === 1 ? 'document' : 'documents'} worth{' '}
-              <span className="tabular-nums">R {fmtR(excluded.selling)}</span> selling / <span className="tabular-nums">R {fmtR(excluded.cost)}</span> cost.
+              <span className="tabular-nums">R {fmtRSigned(excluded.selling)}</span> selling / <span className="tabular-nums">R {fmtRSigned(excluded.cost)}</span> cost.
               {' '}{excluded.reason}
             </p>
           )}
