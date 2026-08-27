@@ -1,0 +1,464 @@
+%PDF-1.3
+%ºß¬à
+3 0 obj
+<</Type /Page
+/Parent 1 0 R
+/Resources 2 0 R
+/MediaBox [0 0 595.2799999999999727 841.8899999999999864]
+/Contents 4 0 R
+>>
+endobj
+4 0 obj
+<<
+/Length 7390
+>>
+stream
+0.5670000000000001 w
+0 G
+0.11 0.15 0.23 rg
+0. 841.8899999999999864 595.2799999999999727 -90.708661417322844 re
+f
+BT
+/F2 18 Tf
+20.6999999999999993 TL
+1. g
+51.0236220472441033 796.5356692913385359 Td
+(Cardoso App) Tj
+ET
+BT
+/F1 11 Tf
+12.6499999999999986 TL
+0.804 0.831 0.871 rg
+51.0236220472441033 773.8585039370078675 Td
+(Product Update) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0.804 0.831 0.871 rg
+487.9563779527558722 773.8585039370078675 Td
+(20 July 2026) Tj
+ET
+BT
+/F1 10.5 Tf
+12.0749999999999993 TL
+0.353 0.392 0.451 rg
+51.0236220472441033 717.1655905511811397 Td
+(This update delivers a built-in Help Centre across every module — searchable articles for Customers,) Tj
+T* (Inventory, Reports, Creditors, BAT Reconciliation, Administration, and Hub & Backups — with a sidebar) Tj
+T* (shortcut that puts help and settings one click away from wherever you are in the app. The full user manual) Tj
+T* (can be printed or saved as a PDF directly from /manual. Head-office users gain new tools on the Hub) Tj
+T* (Backups page: a per-site indicator confirms SQL database backups have reached the off-site repository,) Tj
+T* (snapshot trees can be browsed in the app, and snapshots can be deleted or maintenance run from the) Tj
+T* (viewer without leaving Cardoso.) Tj
+ET
+BT
+/F2 13 Tf
+14.9499999999999993 TL
+0.129 0.145 0.161 rg
+51.0236220472441033 596.9766141732283131 Td
+(New Features) Tj
+ET
+0.09 0.48 0.31 rg
+513.2500787401573916 609.4490551181102092 m
+540.8548031496062549 609.4490551181102092 l
+542.7334410387944672 609.4490551181102092 544.2563779527558836 607.9261182041487928 544.2563779527558836 606.0474803149605805 c
+544.2563779527558836 595.8427559055116944 l
+544.2563779527558836 593.9641180163235958 542.3777400635676713 592.4411811023621794 540.8548031496062549 592.4411811023621794 c
+513.2500787401573916 592.4411811023621794 l
+511.3714408509691793 592.4411811023621794 509.8485039370078198 594.3198189915503917 509.8485039370078198 595.8427559055116944 c
+509.8485039370078198 606.0474803149605805 l
+509.8485039370078198 607.9261182041487928 511.7271418261960321 609.4490551181102092 513.2500787401573916 609.4490551181102092 c
+h
+f
+BT
+/F2 7.5 Tf
+8.625 TL
+1. g
+518.3524409448818915 596.9766141732283131 Td
+(NEW) Tj
+ET
+0.87 0.89 0.91 RG
+0.8503937007874016 w
+51.0236220472441033 588.4726771653542983 m
+544.2563779527558836 588.4726771653542983 l
+S
+0.09 0.48 0.31 rg
+51.0236220472441033 579.9687401574802834 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 571.4648031496062686 Td
+(Built-in Help Centre with articles for every module) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 557.291574803149615 Td
+(A full Help Centre is now available inside the app. Articles cover every module — Customers,) Tj
+T* (Inventory & Reports, Administration, BAT Reconciliation, Creditors, and Hub & Backups — and) Tj
+T* (can be searched by keyword. Find answers without leaving the page you are working on.) Tj
+ET
+0.09 0.48 0.31 rg
+51.0236220472441033 512.220708661417234 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 503.7167716535432191 Td
+(Help and Settings accessible from the sidebar) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 489.5435433070865088 Td
+(A Help flyout and a Settings flyout are now reachable from icons in the sidebar, so you can look) Tj
+T* (something up or adjust a setting from anywhere in the app without navigating away from your) Tj
+T* (current screen.) Tj
+ET
+0.09 0.48 0.31 rg
+51.0236220472441033 444.4726771653542414 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 435.9687401574802266 Td
+(Printable user manual at /manual) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 421.7955118110235162 Td
+(The complete user manual is available at /manual as a single print-ready page. Print a reference) Tj
+T* (copy or save it as a PDF to share with your team.) Tj
+ET
+0.09 0.48 0.31 rg
+51.0236220472441033 390.3309448818896499 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 381.827007874015635 Td
+(Settings tabs are bookmarkable and shareable) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 367.6537795275589815 Td
+(Settings panels can now be deep-linked using ?settings=<tab> in the address bar. Bookmark a) Tj
+T* (specific settings section or share a direct link to it with a colleague.) Tj
+ET
+0.09 0.48 0.31 rg
+51.0236220472441033 336.1892125984251152 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 327.6852755905511003 Td
+(Verify SQL backups reached the off-site hub, and manage snapshots) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 313.5120472440944468 Td
+(The Hub Backups fleet table now shows a per-site indicator confirming whether each site's SQL) Tj
+T* (database backup has been uploaded to the off-site repository. Snapshot trees can be browsed) Tj
+T* (directly in the viewer, and you can delete individual off-site snapshots or trigger repository) Tj
+T* (maintenance without leaving Cardoso.) Tj
+ET
+BT
+/F2 13 Tf
+14.9499999999999993 TL
+0.129 0.145 0.161 rg
+51.0236220472441033 234.9923622047243725 Td
+(Fixes) Tj
+ET
+0.69 0.49 0.09 rg
+508.6750787401573461 247.4648031496062401 m
+540.8548031496061412 247.4648031496062401 l
+542.7334410387943535 247.4648031496062401 544.2563779527557699 245.9418662356448806 544.2563779527557699 244.0632283464566683 c
+544.2563779527557699 233.8585039370078675 l
+544.2563779527557699 231.9798660478196553 542.3777400635675576 230.4569291338582957 540.8548031496061412 230.4569291338582957 c
+508.6750787401573461 230.4569291338582957 l
+506.7964408509691339 230.4569291338582957 505.2735039370077743 232.335567023046508 505.2735039370077743 233.8585039370078675 c
+505.2735039370077743 244.0632283464566683 l
+505.2735039370077743 245.9418662356448806 507.1521418261959866 247.4648031496062401 508.6750787401573461 247.4648031496062401 c
+h
+f
+BT
+/F2 7.5 Tf
+8.625 TL
+1. g
+513.7774409448817323 234.9923622047243725 Td
+(FIXED) Tj
+ET
+0.87 0.89 0.91 RG
+0.8503937007874016 w
+51.0236220472441033 226.4884251968503293 m
+544.2563779527558836 226.4884251968503293 l
+S
+0.69 0.49 0.09 rg
+51.0236220472441033 217.9844881889763144 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 209.480551181102328 Td
+(Sidebar navigation is cleaner) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 195.3073228346455608 Td
+(The subsystem health strip has been removed from the sidebar, keeping the navigation) Tj
+T* (uncluttered. System status and backup health remain available on the dedicated Hub Backups) Tj
+T* (page.) Tj
+ET
+0.87 0.89 0.91 RG
+0.8503937007874016 w
+51.0236220472441033 34.0157480314960665 m
+544.2563779527558836 34.0157480314960665 l
+S
+BT
+/F1 8 Tf
+9.1999999999999993 TL
+0.353 0.392 0.451 rg
+51.0236220472441033 19.8425196850394059 Td
+(Cardoso App · 20 July 2026) Tj
+ET
+BT
+/F1 8 Tf
+9.1999999999999993 TL
+0.353 0.392 0.451 rg
+503.6163779527558404 19.8425196850394059 Td
+(Page 1 of 1) Tj
+ET
+endstream
+endobj
+1 0 obj
+<</Type /Pages
+/Kids [3 0 R ]
+/Count 1
+>>
+endobj
+5 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+6 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica-Bold
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+7 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica-Oblique
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+8 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica-BoldOblique
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+9 0 obj
+<<
+/Type /Font
+/BaseFont /Courier
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+10 0 obj
+<<
+/Type /Font
+/BaseFont /Courier-Bold
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+11 0 obj
+<<
+/Type /Font
+/BaseFont /Courier-Oblique
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+12 0 obj
+<<
+/Type /Font
+/BaseFont /Courier-BoldOblique
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+13 0 obj
+<<
+/Type /Font
+/BaseFont /Times-Roman
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+14 0 obj
+<<
+/Type /Font
+/BaseFont /Times-Bold
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+15 0 obj
+<<
+/Type /Font
+/BaseFont /Times-Italic
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+16 0 obj
+<<
+/Type /Font
+/BaseFont /Times-BoldItalic
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+17 0 obj
+<<
+/Type /Font
+/BaseFont /ZapfDingbats
+/Subtype /Type1
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+18 0 obj
+<<
+/Type /Font
+/BaseFont /Symbol
+/Subtype /Type1
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+2 0 obj
+<<
+/ProcSet [/PDF /Text /ImageB /ImageC /ImageI]
+/Font <<
+/F1 5 0 R
+/F2 6 0 R
+/F3 7 0 R
+/F4 8 0 R
+/F5 9 0 R
+/F6 10 0 R
+/F7 11 0 R
+/F8 12 0 R
+/F9 13 0 R
+/F10 14 0 R
+/F11 15 0 R
+/F12 16 0 R
+/F13 17 0 R
+/F14 18 0 R
+>>
+/XObject <<
+>>
+>>
+endobj
+19 0 obj
+<<
+/Producer (jsPDF 4.2.1)
+/CreationDate (D:20260721061125-00'00')
+>>
+endobj
+20 0 obj
+<<
+/Type /Catalog
+/Pages 1 0 R
+/OpenAction [3 0 R /FitH null]
+/PageLayout /OneColumn
+>>
+endobj
+xref
+0 21
+0000000000 65535 f 
+0000007594 00000 n 
+0000009411 00000 n 
+0000000015 00000 n 
+0000000152 00000 n 
+0000007651 00000 n 
+0000007776 00000 n 
+0000007906 00000 n 
+0000008039 00000 n 
+0000008176 00000 n 
+0000008299 00000 n 
+0000008428 00000 n 
+0000008560 00000 n 
+0000008696 00000 n 
+0000008824 00000 n 
+0000008951 00000 n 
+0000009080 00000 n 
+0000009213 00000 n 
+0000009315 00000 n 
+0000009659 00000 n 
+0000009745 00000 n 
+trailer
+<<
+/Size 21
+/Root 20 0 R
+/Info 19 0 R
+/ID [ <494107A6F294C84DAD2D4C397DF9636F> <494107A6F294C84DAD2D4C397DF9636F> ]
+>>
+startxref
+9849
+%%EOF
