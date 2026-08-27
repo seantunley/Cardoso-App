@@ -19,9 +19,21 @@ const pad = (n) => String(n).padStart(2, '0');
 const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
 const monthStartISO = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-01`; };
 
-function fetchProfit(from, to) {
+// Filter state -> query string, shared by the fetch and the Excel download so a
+// downloaded workbook always matches the filtered screen.
+function profitQuery(from, to, f) {
   const qs = new URLSearchParams({ from, to });
-  return fetch(`/api/reports/invoice-profit?${qs.toString()}`, { credentials: 'include' })
+  if (f.mode === 'losses') qs.set('losses', '1');
+  if (f.mode === 'range') {
+    if (f.min !== '') qs.set('min', f.min);
+    if (f.max !== '') qs.set('max', f.max);
+    qs.set('unit', f.unit);
+  }
+  return qs.toString();
+}
+
+function fetchProfit(from, to, f) {
+  return fetch(`/api/reports/invoice-profit?${profitQuery(from, to, f)}`, { credentials: 'include' })
     .then(async (r) => {
       if (!r.ok) { const b = await r.json().catch(() => ({})); throw new Error(b.error || `HTTP ${r.status}`); }
       return r.json();
@@ -91,6 +103,10 @@ const Chevron = ({ open }) => (
 export default function InvoiceProfit() {
   const [from, setFrom] = useState(monthStartISO());
   const [to, setTo] = useState(todayISO());
+  // mode: 'all' | 'losses' | 'range'. The range bounds are inclusive and read
+  // either as rand of profit or as margin %, per `unit`.
+  const [filter, setFilter] = useState({ mode: 'all', min: '', max: '', unit: 'rand' });
+  const setF = (patch) => setFilter((f) => ({ ...f, ...patch }));
   // Expansion state keyed by month/week/day id. Everything below a month starts
   // closed — a month of invoices is thousands of rows, and rendering them all up
   // front makes the report unusable. A key absent from the map means "default",
@@ -99,8 +115,8 @@ export default function InvoiceProfit() {
   const toggle = (k) => setExpanded((s) => ({ ...s, [k]: !(k in s ? s[k] : false) }));
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['invoice-profit', from, to],
-    queryFn: () => fetchProfit(from, to),
+    queryKey: ['invoice-profit', from, to, filter.mode, filter.min, filter.max, filter.unit],
+    queryFn: () => fetchProfit(from, to, filter),
     staleTime: 60_000,
   });
 
@@ -108,6 +124,9 @@ export default function InvoiceProfit() {
   const months = data?.months || [];
   const totals = data?.totals;
   const excluded = data?.excluded;
+  // Non-null only when the range spans more than one month — see the strip below.
+  const rangeStats = data?.range_stats;
+  const activeFilter = data?.filter?.active ? data.filter : null;
 
   const exportCsv = () => {
     const cell = (v) => Number(v || 0).toFixed(2);
@@ -133,7 +152,7 @@ export default function InvoiceProfit() {
 
   const exportExcel = async () => {
     try {
-      await downloadReport(`/api/reports/invoice-profit/export?from=${from}&to=${to}`, `invoice-profit-${from}-to-${to}.xlsx`);
+      await downloadReport(`/api/reports/invoice-profit/export?${profitQuery(from, to, filter)}`, `invoice-profit-${from}-to-${to}.xlsx`);
     } catch (e) {
       toast.error(`Could not download the Invoice Profit workbook: ${e.message}`);
     }
@@ -176,7 +195,68 @@ export default function InvoiceProfit() {
           <input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)}
             className="h-9 rounded-xl border border-border bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary" />
         </div>
+
+        {/* Profit filter. 'Made no profit' is the common case as a one-click
+            preset; 'Profit between' is the general form, in rand or margin %. */}
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Show</span>
+          <select
+            value={filter.mode}
+            onChange={(e) => setF({ mode: e.target.value })}
+            className="h-9 rounded-xl border border-border bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          >
+            <option value="all">All documents</option>
+            <option value="losses">Invoices that made no profit</option>
+            <option value="range">Invoices in a profit range</option>
+          </select>
+        </div>
+
+        {filter.mode === 'range' && (
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">From</span>
+            <input
+              type="number" value={filter.min} placeholder="any" step="any"
+              onChange={(e) => setF({ min: e.target.value })}
+              className="h-9 w-24 rounded-xl border border-border bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+            />
+            <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">to</span>
+            <input
+              type="number" value={filter.max} placeholder="any" step="any"
+              onChange={(e) => setF({ max: e.target.value })}
+              className="h-9 w-24 rounded-xl border border-border bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+            />
+            {/* Rand or margin % — 'made 5 or less' means different things to
+                different people, so the unit is explicit rather than assumed. */}
+            <div className="flex overflow-hidden rounded-xl border border-border">
+              {[['rand', 'R'], ['pct', '%']].map(([u, lbl]) => (
+                <button
+                  key={u}
+                  onClick={() => setF({ unit: u })}
+                  className={`h-9 px-3 font-mono text-[11px] transition-colors ${filter.unit === u ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                >
+                  {lbl}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* When a filter is on, say plainly what's being shown and what isn't —
+          the totals below describe the MATCHING invoices only. */}
+      {activeFilter && (
+        <div
+          className="mb-4 flex flex-wrap items-baseline gap-x-2 gap-y-1 px-4 py-2.5 text-sm"
+          style={{ border: '1px solid var(--phosphor)', borderRadius: '12px', background: 'hsla(33, 95%, 55%, 0.06)' }}
+        >
+          <span className="font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: 'var(--phosphor)' }}>Filtered</span>
+          <span className="text-foreground">{activeFilter.label}.</span>
+          <span className="text-muted-foreground">
+            {fmtCount(activeFilter.matched)} of {fmtCount(activeFilter.of_invoices)} invoices match — every total below covers those only.
+            Credit notes are left out: each one reverses a sale, so all of them show a negative profit and would swamp the result.
+          </span>
+        </div>
+      )}
 
       {unavailable ? (
         <div className="rounded-xl border border-border bg-card px-6 py-12 text-center text-sm text-muted-foreground">
@@ -184,16 +264,34 @@ export default function InvoiceProfit() {
         </div>
       ) : !isLoading && !error && months.length === 0 ? (
         <div className="rounded-xl border border-border bg-card px-6 py-12 text-center text-sm text-muted-foreground">
-          No posted invoices between {from} and {to}.
+          {activeFilter
+            ? `No invoices between ${from} and ${to} match: ${activeFilter.label.toLowerCase()}.`
+            : `No posted invoices between ${from} and ${to}.`}
         </div>
       ) : months.length > 0 ? (
         <>
-          {/* To-date strip */}
+          {/* Summary strip. The day/week/month "to date" figures are anchored on
+              the last day in the range — meaningful for a single month, but over
+              a multi-month range they'd describe one Friday and one part-week
+              above a table covering half a year. So a multi-month range gets
+              month-vs-month figures instead (range_stats is null for one month,
+              which is the server telling us which strip to draw). */}
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <ToDateCard label="Day to date" sub={data?.latest_day} totals={data?.day_to_date} />
-            <ToDateCard label="Week to date" sub={data?.latest_day ? `to ${data.latest_day}` : ''} totals={data?.week_to_date} />
-            <ToDateCard label="Month to date" sub={data?.latest_day ? `to ${data.latest_day}` : ''} totals={data?.month_to_date} />
-            <ToDateCard label="Range total" sub={`${from} → ${to}`} totals={totals} accent />
+            {rangeStats ? (
+              <>
+                <ToDateCard label="Range total" sub={`${from} → ${to}`} totals={totals} accent />
+                <ToDateCard label="Best month" sub={rangeStats.best_month?.label} totals={rangeStats.best_month?.totals} />
+                <ToDateCard label="Weakest month" sub={rangeStats.weakest_month?.label} totals={rangeStats.weakest_month?.totals} />
+                <ToDateCard label="Monthly average" sub={`across ${rangeStats.month_count} months`} totals={rangeStats.monthly_average} />
+              </>
+            ) : (
+              <>
+                <ToDateCard label="Day to date" sub={data?.latest_day} totals={data?.day_to_date} />
+                <ToDateCard label="Week to date" sub={data?.latest_day ? `to ${data.latest_day}` : ''} totals={data?.week_to_date} />
+                <ToDateCard label="Month to date" sub={data?.latest_day ? `to ${data.latest_day}` : ''} totals={data?.month_to_date} />
+                <ToDateCard label="Range total" sub={`${from} → ${to}`} totals={totals} accent />
+              </>
+            )}
           </div>
 
           {/* Month → Week → Day → invoices */}

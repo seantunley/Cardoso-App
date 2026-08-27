@@ -13,6 +13,9 @@ import { describe, it, expect } from 'vitest';
 import {
   buildProfitTree,
   summariseProfit,
+  rangeStats,
+  filterDocuments,
+  describeFilter,
   isInterBranchName,
   marginPct,
   toSageDate,
@@ -207,5 +210,128 @@ describe('summariseProfit', () => {
     expect(s.day_to_date).toBeNull();
     expect(s.totals.selling).toBe(0);
     expect(s.totals.margin).toBe(0);
+  });
+});
+
+describe('rangeStats', () => {
+  // Three months of differing size, so best/weakest can't accidentally be
+  // "first"/"last" and still pass.
+  const tree = () => buildProfitTree([
+    doc('2026-01-15', 'IN-JAN', 1000, 900),   // profit 100
+    doc('2026-02-15', 'IN-FEB', 2000, 1700),  // profit 300  <- best
+    doc('2026-03-15', 'IN-MAR', 5000, 4950),  // profit  50  <- weakest (biggest turnover)
+  ]);
+
+  it('is null for a single month, so the UI keeps the to-date cards', () => {
+    expect(rangeStats(buildProfitTree([doc('2026-07-01', 'IN1', 100, 90)]))).toBeNull();
+    expect(rangeStats([])).toBeNull();
+    expect(rangeStats(null)).toBeNull();
+  });
+
+  it('ranks best and weakest by profit in rand, not by margin', () => {
+    const s = rangeStats(tree());
+    // March has the largest turnover and Jan the best margin (10%); neither is
+    // the answer — February made the most money.
+    expect(s.best_month.month).toBe('2026-02');
+    expect(s.weakest_month.month).toBe('2026-03');
+    expect(s.best_month.totals.profit).toBe(300);
+    expect(s.weakest_month.totals.profit).toBe(50);
+  });
+
+  it('averages across the months present', () => {
+    const s = rangeStats(tree());
+    expect(s.month_count).toBe(3);
+    expect(s.monthly_average.profit).toBe(450 / 3);
+    expect(s.monthly_average.selling).toBe(8000 / 3);
+    expect(s.monthly_average.cost).toBe(7550 / 3);
+  });
+
+  it('takes the average margin from the totals, not the mean of the percentages', () => {
+    const s = rangeStats(tree());
+    // Mean of per-month margins would be (10 + 15 + 1)/3 = 8.67% — which would
+    // let a tiny high-margin month outvote a huge thin one.
+    expect(round(s.monthly_average.margin)).toBe(round((450 / 8000) * 100));
+    expect(round(s.monthly_average.margin)).toBe(5.63);
+  });
+
+  it('carries the per-month margin so the comparison stays visible', () => {
+    const s = rangeStats(tree());
+    expect(round(s.best_month.totals.margin)).toBe(15);
+    expect(round(s.weakest_month.totals.margin)).toBe(1);
+  });
+
+  it('handles a loss-making month as the weakest', () => {
+    const s = rangeStats(buildProfitTree([
+      doc('2026-01-15', 'IN1', 1000, 900),
+      doc('2026-02-15', 'IN2', 1000, 1200), // sold below cost
+    ]));
+    expect(s.weakest_month.month).toBe('2026-02');
+    expect(s.weakest_month.totals.profit).toBe(-200);
+    expect(s.monthly_average.profit).toBe(-50);
+  });
+});
+
+describe('filterDocuments', () => {
+  const docs = [
+    doc('2026-07-01', 'IN-LOSS', 1000, 1200),   // profit -200, margin -20%
+    doc('2026-07-01', 'IN-EVEN', 1000, 1000),   // profit    0, margin   0%
+    doc('2026-07-01', 'IN-THIN', 1000, 996),    // profit    4, margin 0.4%
+    doc('2026-07-01', 'IN-FIVE', 1000, 995),    // profit    5, margin 0.5%
+    doc('2026-07-01', 'IN-FAT',  1000, 800),    // profit  200, margin  20%
+    doc('2026-07-01', 'CN-1', -500, -450, 'credit_note'), // profit -50
+  ];
+  const nums = (r) => r.map((d) => d.doc_number);
+
+  it('returns everything untouched when no filter is set', () => {
+    expect(filterDocuments(docs, {})).toBe(docs);
+    expect(filterDocuments(docs, { min: null, max: null })).toBe(docs);
+  });
+
+  it('treats break-even as "made no profit"', () => {
+    expect(nums(filterDocuments(docs, { losses: true }))).toEqual(['IN-LOSS', 'IN-EVEN']);
+  });
+
+  it('excludes credit notes from every filtered result', () => {
+    // A credit note ALWAYS has negative profit — including them would bury the
+    // real loss-makers under every return in the period.
+    for (const f of [{ losses: true }, { max: 5 }, { min: -1000, max: 1000 }]) {
+      expect(nums(filterDocuments(docs, f))).not.toContain('CN-1');
+    }
+  });
+
+  it('filters by rand of profit, inclusive on both bounds', () => {
+    expect(nums(filterDocuments(docs, { max: 5 }))).toEqual(['IN-LOSS', 'IN-EVEN', 'IN-THIN', 'IN-FIVE']);
+    expect(nums(filterDocuments(docs, { min: 5 }))).toEqual(['IN-FIVE', 'IN-FAT']);
+    expect(nums(filterDocuments(docs, { min: 0, max: 5 }))).toEqual(['IN-EVEN', 'IN-THIN', 'IN-FIVE']);
+  });
+
+  it('filters by margin percentage when the unit says so', () => {
+    // Same "5 or less" bound, read as a percentage instead of rand — a
+    // different set, which is exactly why the unit is explicit in the UI.
+    expect(nums(filterDocuments(docs, { max: 5, unit: 'pct' })))
+      .toEqual(['IN-LOSS', 'IN-EVEN', 'IN-THIN', 'IN-FIVE']);
+    expect(nums(filterDocuments(docs, { min: 5, unit: 'pct' }))).toEqual(['IN-FAT']);
+  });
+
+  it('rolls up cleanly off a filtered list', () => {
+    const tree = buildProfitTree(filterDocuments(docs, { losses: true }));
+    expect(tree[0].totals.profit).toBe(-200);
+    expect(tree[0].totals.invoice_count).toBe(2);
+    expect(tree[0].totals.credit_note_count).toBe(0);
+  });
+});
+
+describe('describeFilter', () => {
+  it('says nothing when no filter is active', () => {
+    expect(describeFilter({})).toBeNull();
+    expect(describeFilter({ min: null, max: null })).toBeNull();
+  });
+
+  it('describes each shape in plain English, with the unit', () => {
+    expect(describeFilter({ losses: true })).toBe('Invoices that made no profit (R0 or less)');
+    expect(describeFilter({ max: 5 })).toBe('Invoices that made R5 or less');
+    expect(describeFilter({ max: 5, unit: 'pct' })).toBe('Invoices that made 5% or less');
+    expect(describeFilter({ min: 100 })).toBe('Invoices that made R100 or more');
+    expect(describeFilter({ min: 0, max: 5 })).toBe('Invoices with a profit between R0 and R5');
   });
 });

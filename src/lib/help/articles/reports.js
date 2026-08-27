@@ -126,7 +126,7 @@ export const reportsArticles = [
       { type: "h", text: "Reading the report" },
       {
         type: "p",
-        text: "The four cards across the top are the to-date figures: the latest trading day, the week and month that day falls in, and the total for the whole range you've selected.",
+        text: "The four cards across the top adapt to the range. Over a single month they are the to-date figures — the latest trading day, the week and month that day falls in, and the range total. Over a longer range those would each describe a sliver of the final month, so you get the range total, the best and weakest months, and a monthly average instead.",
       },
       {
         type: "steps",
@@ -147,6 +147,23 @@ export const reportsArticles = [
           ["Margin", "Profit as a percentage of Selling."],
           ["Inv / CN", "How many invoices and credit notes are in that day, week or month."],
         ],
+      },
+      { type: "h", text: "Finding the bad ones" },
+      {
+        type: "p",
+        text: "The **Show** dropdown narrows the report to the invoices worth investigating:",
+      },
+      {
+        type: "list",
+        items: [
+          "**Invoices that made no profit** — everything at R0 profit or below, including break-even.",
+          "**Invoices in a profit range** — give a lower bound, an upper bound, or both. The **R / %** switch beside the boxes decides whether those bounds mean rand of profit or margin percentage. Bounds include their endpoints, and a blank box means unbounded, so leaving \"from\" empty and typing 5 into \"to\" gives you everything that made R5 or less.",
+        ],
+      },
+      {
+        type: "callout",
+        tone: "warning",
+        text: "While a filter is on, every total on the page — the cards, the day/week/month rollups and the exports — covers the matching invoices only, and the orange bar at the top says how many matched. Credit notes are left out of a filtered view: each one reverses a sale, so they all carry a negative profit and would swamp the genuinely loss-making invoices.",
       },
       { type: "h", text: "What the numbers include" },
       {

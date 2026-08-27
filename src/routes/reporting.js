@@ -767,12 +767,30 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     };
   };
 
+  // Profit/margin filters: ?losses=1, or ?min=&max= with ?unit=rand|pct.
+  // Bounds are inclusive; a blank or non-numeric bound is simply "unbounded"
+  // rather than an error, so half-typed input in the UI degrades to a wider
+  // result instead of a red box.
+  const parseProfitFilters = (query) => {
+    const bound = (v) => {
+      if (v === undefined || v === null || String(v).trim() === '') return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+    return {
+      losses: ['1', 'true', 'yes', 'on'].includes(String(query.losses || '').toLowerCase()),
+      min: bound(query.min),
+      max: bound(query.max),
+      unit: String(query.unit || 'rand').toLowerCase() === 'pct' ? 'pct' : 'rand',
+    };
+  };
+
   // Shared by the JSON route and the Excel export so the workbook can never
   // drift from what's on screen.
   const loadProfitReport = async (query) => {
     const { from, to } = parseProfitRange(query);
     const pool = await getSagePool();
-    const report = await buildProfitReport({ pool, from, to });
+    const report = await buildProfitReport({ pool, from, to, filters: parseProfitFilters(query) });
     const depotRow = prep('SELECT name FROM depot_profile WHERE id = 1').get();
     return { ...report, site_name: (depotRow?.name || '').trim() || SITE_NAME };
   };

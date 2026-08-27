@@ -312,20 +312,135 @@ export function summariseProfit(documents) {
 }
 
 /**
+ * Narrow the report to the invoices worth looking at — the loss-makers, or a
+ * profit/margin band ("everything that made R5 or less").
+ *
+ * CREDIT NOTES ARE DROPPED WHENEVER A FILTER IS ACTIVE. Every credit note has
+ * negative profit by construction — it reverses a sale that carried a margin —
+ * so a plain "profit <= 0" would return all 461 of July's credit notes and bury
+ * the handful of genuinely loss-making invoices underneath them. A returned sale
+ * is not a sale that failed to make money. The UI says this on screen when a
+ * filter is on, so nobody has to infer it from a document count.
+ *
+ * Bounds are INCLUSIVE, and `unit` chooses what they measure:
+ *   'rand' → the invoice's profit in rand
+ *   'pct'  → its margin percentage
+ *
+ * @param {object[]} documents
+ * @param {{ losses?: boolean, min?: number|null, max?: number|null, unit?: 'rand'|'pct' }} filters
+ */
+export function filterDocuments(documents, filters = {}) {
+  const { losses = false, min = null, max = null, unit = 'rand' } = filters;
+  const hasMin = Number.isFinite(min);
+  const hasMax = Number.isFinite(max);
+  if (!losses && !hasMin && !hasMax) return documents;
+
+  return documents.filter((d) => {
+    if (d.doc_type !== 'invoice') return false;
+    // "Didn't make a profit" includes breaking exactly even — an invoice that
+    // returned its cost and nothing more is not a profitable one.
+    if (losses) return d.profit <= 0;
+    const value = unit === 'pct' ? d.margin : d.profit;
+    if (hasMin && value < min) return false;
+    if (hasMax && value > max) return false;
+    return true;
+  });
+}
+
+/** Human-readable description of an active filter, shown on screen and in exports. */
+export function describeFilter({ losses = false, min = null, max = null, unit = 'rand' } = {}) {
+  const hasMin = Number.isFinite(min);
+  const hasMax = Number.isFinite(max);
+  if (losses) return 'Invoices that made no profit (R0 or less)';
+  if (!hasMin && !hasMax) return null;
+  const fmt = (v) => (unit === 'pct' ? `${v}%` : `R${v}`);
+  if (hasMin && hasMax) return `Invoices with a profit between ${fmt(min)} and ${fmt(max)}`;
+  if (hasMax) return `Invoices that made ${fmt(max)} or less`;
+  return `Invoices that made ${fmt(min)} or more`;
+}
+
+/**
+ * Range-level figures for a report spanning MORE THAN ONE MONTH.
+ *
+ * The day/week/month "to date" figures above are anchored on the last day in the
+ * range. Over a single month that's exactly what you want; over Jan–Jul it means
+ * three of the four summary cards describe one Friday, one part-week and one
+ * month, sitting above a table covering seven — right numbers, wrong question.
+ * So a multi-month range gets these instead: how the months compare, and what an
+ * average one looks like.
+ *
+ * Best/weakest are ranked by PROFIT (rand), not margin — a high-margin month
+ * that sold nothing isn't the best month. Each carries its own margin so the
+ * comparison is still visible.
+ *
+ * Returns null for a single-month range, which is the UI's signal to keep
+ * showing the to-date cards.
+ *
+ * @param {ReturnType<typeof buildProfitTree>} months
+ */
+export function rangeStats(months) {
+  if (!months || months.length < 2) return null;
+
+  const byProfit = [...months].sort((a, b) => b.totals.profit - a.totals.profit);
+  const brief = (m) => ({ month: m.month, label: m.label, totals: m.totals });
+
+  const n = months.length;
+  const sumOf = (key) => months.reduce((s, m) => s + m.totals[key], 0);
+  const avgSelling = sumOf('selling') / n;
+  const avgProfit = sumOf('profit') / n;
+
+  return {
+    month_count: n,
+    best_month: brief(byProfit[0]),
+    weakest_month: brief(byProfit[byProfit.length - 1]),
+    monthly_average: {
+      selling: avgSelling,
+      cost: sumOf('cost') / n,
+      profit: avgProfit,
+      invoice_count: Math.round(sumOf('invoice_count') / n),
+      credit_note_count: Math.round(sumOf('credit_note_count') / n),
+      // Margin of the averages is the range margin — dividing the summed profit
+      // by the summed selling, not averaging the per-month percentages (which
+      // would weight a quiet month the same as a busy one).
+      margin: marginPct(avgProfit, avgSelling),
+    },
+  };
+}
+
+/**
  * Full report payload — the ONE builder both the site route and (once the hub
  * rollup lands) the hub route call, so the two can never compute different
  * numbers for the same day.
  *
- * @param {{ pool: import('mssql').ConnectionPool, from: string, to: string }} args
+ * @param {{ pool: import('mssql').ConnectionPool, from: string, to: string,
+ *           filters?: { losses?: boolean, min?: number|null, max?: number|null, unit?: 'rand'|'pct' } }} args
  */
-export async function buildProfitReport({ pool, from, to }) {
-  const { documents, excluded } = await fetchProfitDocuments({ pool, from, to });
+export async function buildProfitReport({ pool, from, to, filters = {} }) {
+  const { documents: all, excluded } = await fetchProfitDocuments({ pool, from, to });
+  // Every total on the report — cards, rollups, exports — is built from the
+  // SAME filtered list, so what's on screen always adds up to what's in the
+  // rows underneath it.
+  const documents = filterDocuments(all, filters);
+  const filterLabel = describeFilter(filters);
   const summary = summariseProfit(documents);
+  const months = buildProfitTree(documents);
   return {
     from,
     to,
-    months: buildProfitTree(documents),
+    months,
+    range_stats: rangeStats(months),
     ...summary,
+    filter: filterLabel
+      ? {
+        active: true,
+        label: filterLabel,
+        matched: documents.length,
+        // Invoices only — the denominator has to match what the filter
+        // considered, or "12 of 16,032" reads as if 16,020 invoices were
+        // profitable when most of that number is credit notes.
+        of_invoices: all.filter((d) => d.doc_type === 'invoice').length,
+      }
+      : { active: false },
     document_count: documents.length,
     excluded: {
       ...excluded,
