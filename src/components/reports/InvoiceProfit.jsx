@@ -1,4 +1,5 @@
 import { useState, Fragment } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ReportFrame, PrintHeader, PrintFooter, fmtRSigned, fmtCount, downloadCsv, downloadReport } from './lib';
@@ -12,8 +13,10 @@ import { ReportFrame, PrintHeader, PrintFooter, fmtRSigned, fmtCount, downloadCs
 // Inter-branch depot transfers are excluded (and reported as excluded, at the
 // foot of the report — never silently dropped).
 //
-// Site-only for now: the hub keeps monthly AR totals, not per-invoice cost, so
-// it shows an explicit note rather than an empty report.
+// On the HUB this becomes a totals-only view: Day / Week / Month / Year per
+// branch, rolled up from the day totals the ETL pulls. The hub holds no
+// invoices, so each branch row links into that branch's own report on the
+// period's exact dates — the detail has one home and cannot drift.
 
 const pad = (n) => String(n).padStart(2, '0');
 const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
@@ -21,8 +24,9 @@ const monthStartISO = () => { const d = new Date(); return `${d.getFullYear()}-$
 
 // Filter state -> query string, shared by the fetch and the Excel download so a
 // downloaded workbook always matches the filtered screen.
-function profitQuery(from, to, f) {
+function profitQuery(from, to, f, periodType) {
   const qs = new URLSearchParams({ from, to });
+  if (periodType) qs.set('period', periodType);
   if (f.mode === 'losses') qs.set('losses', '1');
   if (f.mode === 'range') {
     if (f.min !== '') qs.set('min', f.min);
@@ -32,8 +36,8 @@ function profitQuery(from, to, f) {
   return qs.toString();
 }
 
-function fetchProfit(from, to, f) {
-  return fetch(`/api/reports/invoice-profit?${profitQuery(from, to, f)}`, { credentials: 'include' })
+function fetchProfit(from, to, f, periodType) {
+  return fetch(`/api/reports/invoice-profit?${profitQuery(from, to, f, periodType)}`, { credentials: 'include' })
     .then(async (r) => {
       if (!r.ok) { const b = await r.json().catch(() => ({})); throw new Error(b.error || `HTTP ${r.status}`); }
       return r.json();
@@ -184,13 +188,143 @@ function DocumentLines({ doc, colSpan }) {
   );
 }
 
+// ── Hub view ────────────────────────────────────────────────────────────────
+// The hub carries TOTALS ONLY — day / week / month / year per branch. The
+// invoices live at the branch that raised them, so each branch row links
+// straight into that branch's own report on this period's dates.
+const PERIOD_LABEL = { day: 'Day', week: 'Week', month: 'Month', year: 'Year' };
+
+function HubPeriods({ data, periodType, onPeriodType }) {
+  const [open, setOpen] = useState({});
+  const periods = data?.periods || [];
+  const totals = data?.totals;
+
+  return (
+    <>
+      <div className="report-print-hide mb-4 flex flex-wrap items-center gap-3">
+        <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Totals by</span>
+        <div className="flex overflow-hidden rounded-xl border border-border">
+          {(data?.filters?.period_types || ['day', 'week', 'month', 'year']).map((t) => (
+            <button
+              key={t}
+              onClick={() => onPeriodType(t)}
+              className={`h-9 px-4 font-mono text-[11px] uppercase tracking-wider transition-colors ${periodType === t ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              {PERIOD_LABEL[t] || t}
+            </button>
+          ))}
+        </div>
+        {data?.last_synced_at && (
+          <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-subtle">
+            synced {new Date(data.last_synced_at).toLocaleString('en-ZA', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+          </span>
+        )}
+      </div>
+
+      {!periods.length ? (
+        <div className="rounded-xl border border-border bg-card px-6 py-12 text-center text-sm text-muted-foreground">
+          {data?.empty_reason || 'No branch profit totals on the hub yet.'}
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-border bg-card">
+          <table className="w-full text-sm report-doc-table" style={{ minWidth: 900 }}>
+            <thead>
+              <tr className="border-b border-border text-[10px] uppercase tracking-wider text-muted-foreground">
+                <th className="px-3 py-1.5 text-left font-medium">{PERIOD_LABEL[periodType] || 'Period'}</th>
+                <th className="px-3 py-1.5 text-left font-medium">Branch</th>
+                <th className="px-3 py-1.5 text-right font-medium">Inv</th>
+                <th className="px-3 py-1.5 text-right font-medium">CN</th>
+                <th className="px-3 py-1.5 text-right font-medium border-l border-border">Selling (ex-VAT)</th>
+                <th className="px-3 py-1.5 text-right font-medium">Cost</th>
+                <th className="px-3 py-1.5 text-right font-medium border-l border-border">Profit</th>
+                <th className="px-3 py-1.5 text-right font-medium">Margin</th>
+              </tr>
+            </thead>
+            <tbody>
+              {periods.map((p) => {
+                const isOpen = !!open[p.period_key];
+                return (
+                  <Fragment key={p.period_key}>
+                    <tr
+                      className="border-b border-border bg-muted/40 hover:bg-muted/60 cursor-pointer"
+                      onClick={() => setOpen((o) => ({ ...o, [p.period_key]: !isOpen }))}
+                    >
+                      <td className="px-3 py-2 font-display text-base" colSpan={2}>
+                        <Chevron open={isOpen} /> {p.period_key}
+                        <span className="ml-2 font-mono text-[10px] uppercase tracking-wider text-muted-subtle">
+                          {p.period_start} – {p.period_end} · {p.branches.length} {p.branches.length === 1 ? 'branch' : 'branches'}
+                        </span>
+                      </td>
+                      <TotalsCells totals={p} bold />
+                    </tr>
+                    {isOpen && p.branches.map((b) => (
+                      <tr key={`${p.period_key}/${b.site_id}`} className="border-b border-border/30 bg-background/40">
+                        <td className="px-3 py-1.5 pl-10" />
+                        <td className="px-3 py-1.5">
+                          {b.site_name}
+                          {/* Drill-down lives at the branch — the hub holds no
+                              invoices, so this opens that branch's own report
+                              already scoped to this period. */}
+                          {b.drill_url ? (
+                            <a
+                              href={b.drill_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="ml-2 font-mono text-[10px] uppercase tracking-wider hover:underline"
+                              style={{ color: 'var(--phosphor)' }}
+                            >
+                              invoices →
+                            </a>
+                          ) : (
+                            <span className="ml-2 font-mono text-[10px] uppercase tracking-wider text-muted-subtle" title="The hub has no address on file for this branch">
+                              no link
+                            </span>
+                          )}
+                        </td>
+                        <TotalsCells totals={b} />
+                      </tr>
+                    ))}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+            <tfoot>
+              <tr className="border-t-2 border-border bg-muted/40">
+                <td className="px-3 py-2 font-semibold" colSpan={2}>
+                  Total · {periods.length} {periods.length === 1 ? PERIOD_LABEL[periodType].toLowerCase() : `${PERIOD_LABEL[periodType].toLowerCase()}s`}
+                </td>
+                <TotalsCells totals={totals} bold />
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
+    </>
+  );
+}
+
 const Chevron = ({ open }) => (
   <span className="inline-block w-3 font-mono text-[10px] text-muted-foreground">{open ? '▾' : '▸'}</span>
 );
 
 export default function InvoiceProfit() {
-  const [from, setFrom] = useState(monthStartISO());
-  const [to, setTo] = useState(todayISO());
+  // Dates live in the URL so the hub's "invoices →" link can hand a branch an
+  // exact period, and so a filtered view can be shared or bookmarked.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const isDate = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
+  const [from, setFromState] = useState(() => (isDate(searchParams.get('from')) ? searchParams.get('from') : monthStartISO()));
+  const [to, setToState] = useState(() => (isDate(searchParams.get('to')) ? searchParams.get('to') : todayISO()));
+  const putParam = (key, value) => setSearchParams((prev) => {
+    const next = new URLSearchParams(prev);
+    next.set(key, value);
+    return next;
+  }, { replace: true });
+  const setFrom = (v) => { setFromState(v); putParam('from', v); };
+  const setTo = (v) => { setToState(v); putParam('to', v); };
+  // Hub only: which period bucket the totals table shows.
+  const [periodType, setPeriodTypeState] = useState(() => searchParams.get('period') || 'month');
+  const setPeriodType = (v) => { setPeriodTypeState(v); putParam('period', v); };
   // mode: 'all' | 'losses' | 'range'. The range bounds are inclusive and read
   // either as rand of profit or as margin %, per `unit`.
   const [filter, setFilter] = useState({ mode: 'all', min: '', max: '', unit: 'rand' });
@@ -203,11 +337,12 @@ export default function InvoiceProfit() {
   const toggle = (k) => setExpanded((s) => ({ ...s, [k]: !(k in s ? s[k] : false) }));
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['invoice-profit', from, to, filter.mode, filter.min, filter.max, filter.unit],
-    queryFn: () => fetchProfit(from, to, filter),
+    queryKey: ['invoice-profit', from, to, filter.mode, filter.min, filter.max, filter.unit, periodType],
+    queryFn: () => fetchProfit(from, to, filter, periodType),
     staleTime: 60_000,
   });
 
+  const isHub = !!data?.hub_mode;
   const unavailable = !!data?.unavailable;
   const months = data?.months || [];
   const totals = data?.totals;
@@ -262,12 +397,14 @@ export default function InvoiceProfit() {
   return (
     <ReportFrame
       title={<>Invoice <em className="text-phosphor">Profit</em>.</>}
-      subtitle="Every posted invoice with its selling, cost and profit, rolled up by day, week and month. Cost is what Sage costed onto the document when it was raised, so these figures never restate themselves. Credit notes are netted off; inter-branch depot transfers are excluded. Amounts ex-VAT, in Rand (R)."
+      subtitle={isHub
+        ? 'Profit totals from every branch, by day, week, month and year. The hub carries totals only — open a branch row’s "invoices →" link to drill into the documents behind it, on that branch’s own system. Credit notes netted off; inter-branch transfers excluded. Amounts ex-VAT, in Rand (R).'
+        : 'Every posted invoice with its selling, cost and profit, rolled up by day, week and month. Cost is what Sage costed onto the document when it was raised, so these figures never restate themselves. Credit notes are netted off; inter-branch depot transfers are excluded. Amounts ex-VAT, in Rand (R).'}
       printId="invoice-profit"
       orientation="landscape"
-      onExportCsv={months.length ? exportCsv : undefined}
-      onExportExcel={months.length ? exportExcel : undefined}
-      onExportPdf={months.length ? exportPdf : undefined}
+      onExportCsv={!isHub && months.length ? exportCsv : undefined}
+      onExportExcel={!isHub && months.length ? exportExcel : undefined}
+      onExportPdf={!isHub && months.length ? exportPdf : undefined}
       onPrint={() => window.print()}
       isLoading={isLoading}
       error={error?.message}
@@ -275,12 +412,16 @@ export default function InvoiceProfit() {
         <PrintHeader
           title="Invoice Profit"
           period={`${from} to ${to}`}
-          filters={['Ex-VAT, in Rand (R)', 'Credit notes netted off', 'Inter-branch transfers excluded']}
+          filters={[isHub ? 'All branches · totals only' : 'Ex-VAT, in Rand (R)', 'Credit notes netted off', 'Inter-branch transfers excluded']}
           generatedAt={generatedAtFmt}
         />
       }
       printFooter={<PrintFooter note="Invoice Profit · Cardoso · Confidential — contains cost and margin" />}
     >
+      {isHub ? (
+        <HubPeriods data={data} periodType={periodType} onPeriodType={setPeriodType} />
+      ) : (
+      <>
       <div className="report-print-hide mb-4 flex flex-wrap items-center gap-4">
         <div className="flex items-center gap-2">
           <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">From</span>
@@ -512,6 +653,8 @@ export default function InvoiceProfit() {
           )}
         </>
       ) : null}
+      </>
+      )}
     </ReportFrame>
   );
 }

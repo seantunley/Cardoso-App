@@ -474,6 +474,146 @@ export function describeFilter({ losses = false, min = null, max = null, unit = 
   return `Invoices that made ${fmt(min)} or more`;
 }
 
+// Period buckets the hub presents. The hub stores DAYS ONLY and derives the
+// other three, so a rollup can never disagree with the days it is made of.
+export const PERIOD_TYPES = ['day', 'week', 'month', 'year'];
+
+// Last calendar day of a 'YYYY-MM'.
+const monthEnd = (ym) => {
+  const y = Number(ym.slice(0, 4));
+  const m = Number(ym.slice(5, 7));
+  return `${ym}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, '0')}`;
+};
+
+// Inter-branch exclusion, in SQL this time. LOWER() is not optional: this Sage
+// database has a CASE-SENSITIVE collation, so an unwrapped LIKE '%Inter Branch%'
+// silently matches only one spelling. Same three spellings as
+// isInterBranchName() above, which is what the per-invoice path uses.
+const IB_SQL = (alias) => `(
+  LOWER(${alias}.NAMECUST) LIKE '%inter branch%' OR
+  LOWER(${alias}.NAMECUST) LIKE '%inter-branch%' OR
+  LOWER(${alias}.NAMECUST) LIKE '%interbranch%'
+)`;
+
+/**
+ * Profit totals BY DAY, aggregated in SQL.
+ *
+ * The per-invoice path (fetchProfitDocuments) pulls ~45,000 rows for two years
+ * and builds an object per document — fine for a month on screen, far too heavy
+ * for the hub's two-year window. These four grouped queries return ~830 rows for
+ * the same period and were checked against the document path for July 2026:
+ * selling, cost and profit match to the cent.
+ *
+ * @param {{ pool: import('mssql').ConnectionPool, from: string, to: string }} args
+ * @returns {Promise<Array<{ day: string, selling: number, cost: number, profit: number,
+ *                           invoice_count: number, credit_note_count: number }>>}
+ */
+export async function fetchProfitDayTotals({ pool, from, to }) {
+  const fromInt = toSageDate(from);
+  const toInt = toSageDate(to);
+  if (fromInt > toInt) {
+    throw new Error(`Invoice Profit day totals: the "from" date (${from}) is after the "to" date (${to}).`);
+  }
+  const run = (text) => pool.request()
+    .input('from', sql.Int, fromInt)
+    .input('to', sql.Int, toInt)
+    .query(text);
+
+  const [invSell, invCost, cnSell, cnCost] = await Promise.all([
+    run(`SELECT h.INVDATE AS ymd, SUM(h.INVNETNOTX) AS amount, COUNT(*) AS docs
+         FROM OEINVH h
+         LEFT JOIN ARCUS cu ON LTRIM(RTRIM(cu.IDCUST)) = LTRIM(RTRIM(h.CUSTOMER))
+         WHERE h.INVDATE BETWEEN @from AND @to AND NOT ${IB_SQL('cu')}
+         GROUP BY h.INVDATE`),
+    run(`SELECT h.INVDATE AS ymd, SUM(d.EXTICOST) AS amount
+         FROM OEINVD d
+         INNER JOIN OEINVH h ON h.INVUNIQ = d.INVUNIQ
+         LEFT JOIN ARCUS cu ON LTRIM(RTRIM(cu.IDCUST)) = LTRIM(RTRIM(h.CUSTOMER))
+         WHERE h.INVDATE BETWEEN @from AND @to AND NOT ${IB_SQL('cu')}
+         GROUP BY h.INVDATE`),
+    run(`SELECT k.CRDDATE AS ymd, SUM(k.CRDNETNOTX) AS amount, COUNT(*) AS docs
+         FROM OECRDH k
+         LEFT JOIN ARCUS cu ON LTRIM(RTRIM(cu.IDCUST)) = LTRIM(RTRIM(k.CUSTOMER))
+         WHERE k.CRDDATE BETWEEN @from AND @to AND NOT ${IB_SQL('cu')}
+         GROUP BY k.CRDDATE`),
+    run(`SELECT k.CRDDATE AS ymd, SUM(d.EXTCCOST) AS amount
+         FROM OECRDD d
+         INNER JOIN OECRDH k ON k.CRDUNIQ = d.CRDUNIQ
+         LEFT JOIN ARCUS cu ON LTRIM(RTRIM(cu.IDCUST)) = LTRIM(RTRIM(k.CUSTOMER))
+         WHERE k.CRDDATE BETWEEN @from AND @to AND NOT ${IB_SQL('cu')}
+         GROUP BY k.CRDDATE`),
+  ]);
+
+  /** @type {Map<string, any>} */
+  const days = new Map();
+  const at = (ymd) => {
+    const day = fromSageDate(ymd);
+    let d = days.get(day);
+    if (!d) { d = { day, selling: 0, cost: 0, profit: 0, invoice_count: 0, credit_note_count: 0 }; days.set(day, d); }
+    return d;
+  };
+  // Credit notes subtract, matching the sign convention the whole report uses.
+  for (const r of invSell.recordset) { const d = at(r.ymd); d.selling += num(r.amount); d.invoice_count += num(r.docs); }
+  for (const r of invCost.recordset) { at(r.ymd).cost += num(r.amount); }
+  for (const r of cnSell.recordset) { const d = at(r.ymd); d.selling -= num(r.amount); d.credit_note_count += num(r.docs); }
+  for (const r of cnCost.recordset) { at(r.ymd).cost -= num(r.amount); }
+
+  return [...days.values()]
+    .map((d) => ({ ...d, profit: d.selling - d.cost }))
+    .sort((a, b) => a.day.localeCompare(b.day));
+}
+
+/**
+ * Roll day totals up into day / week / month / year buckets.
+ *
+ * Every bucket carries `period_start` and `period_end` because the hub's
+ * drill-down link hands the branch an exact date range — the branch owns the
+ * invoices, and a link that guesses the range lands on the wrong numbers.
+ *
+ * Weeks are ISO (Monday start), keyed by ISO year so a week straddling New Year
+ * keeps one key. YEARS are CALENDAR years: "2026" must mean the trading year the
+ * accounts are cut on, not ISO-2026, which can begin in December.
+ *
+ * @param {Array<{ day: string, selling: number, cost: number, invoice_count?: number, credit_note_count?: number }>} days
+ */
+export function rollUpDays(days) {
+  const buckets = { day: new Map(), week: new Map(), month: new Map(), year: new Map() };
+
+  const bump = (type, key, start, end, row) => {
+    let b = buckets[type].get(key);
+    if (!b) {
+      b = { period_type: type, period_key: key, period_start: start, period_end: end, ...emptyTotals() };
+      buckets[type].set(key, b);
+    }
+    b.selling += num(row.selling);
+    b.cost += num(row.cost);
+    b.profit += num(row.selling) - num(row.cost);
+    b.invoice_count += num(row.invoice_count);
+    b.credit_note_count += num(row.credit_note_count);
+  };
+
+  const isoDay = (dt) => dt.toISOString().slice(0, 10);
+
+  for (const row of days || []) {
+    if (!row?.day) continue;
+    const ym = row.day.slice(0, 7);
+    const year = row.day.slice(0, 4);
+    const { year: wy, week: wn } = isoWeek(row.day);
+    bump('day', row.day, row.day, row.day, row);
+    bump('week', `${wy}-W${String(wn).padStart(2, '0')}`, isoDay(dateFromIso(wy, wn, 1)), isoDay(dateFromIso(wy, wn, 7)), row);
+    bump('month', ym, `${ym}-01`, monthEnd(ym), row);
+    bump('year', year, `${year}-01-01`, `${year}-12-31`, row);
+  }
+
+  const out = {};
+  for (const type of PERIOD_TYPES) {
+    out[type] = [...buckets[type].values()]
+      .map(sealTotals)
+      .sort((a, b) => a.period_key.localeCompare(b.period_key));
+  }
+  return out;
+}
+
 /**
  * Range-level figures for a report spanning MORE THAN ONE MONTH.
  *

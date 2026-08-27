@@ -112,6 +112,7 @@ import m106 from './v106_item_vendor.js';
 import m107 from './v107_bat_order_number_indexes.js';
 import m108 from './v108_bat_preview_pages.js';
 import m109 from './v109_drop_network_devices_feature.js';
+import m110 from './v110_hub_invoice_profit.js';
 
 const migrations = [
   m1,
@@ -223,6 +224,7 @@ const migrations = [
   m107,
   m108,
   m109,
+  m110,
 ];
 
 migrations.sort((a, b) => a.version - b.version);

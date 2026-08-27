@@ -25,7 +25,7 @@ import { expandDataRecord, getFirstNonEmptyObjectValue, parseJsonSafely, SALES_R
 import { analyseInvoiceCredit } from '../lib/creditAnalysis.js';
 import { getCreditLogicForAnalysis } from '../services/creditLogic.js';
 import { ageOpenItems, BUCKET_KEYS, AP_SCHEME } from '../services/aging.js';
-import { buildProfitReport, fetchDocumentLines } from '../services/reporting/profitReport.js';
+import { buildProfitReport, fetchDocumentLines, fetchProfitDayTotals, rollUpDays, PERIOD_TYPES } from '../services/reporting/profitReport.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -785,6 +785,106 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     };
   };
 
+  // -- Hub: totals-only view ---------------------------------------------------
+  // Reads hub_invoice_profit_day (day totals the ETL pulls from each branch) and
+  // rolls them into whichever period the caller asked for - Day, Week, Month or
+  // Year. The rollup happens HERE, from the day rows, through the same
+  // rollUpDays() the branch endpoint is defined by, so hub figures and branch
+  // figures come from one implementation.
+  //
+  // No invoices on the hub by design: every branch row carries the URL and the
+  // exact date range needed to open that period in that branch's own report, so
+  // the detail has one home and cannot drift from the totals.
+  const buildHubProfitTotals = (query) => {
+    const periodType = PERIOD_TYPES.includes(String(query.period || '')) ? String(query.period) : 'month';
+    const siteFilter = String(query.site || 'all').trim();
+    // How far back each period type is worth showing.
+    const limits = { day: 60, week: 26, month: 24, year: 5 };
+
+    const sites = prep(`
+      SELECT DISTINCT COALESCE(hs.name, t.site_id) AS site_name
+      FROM hub_invoice_profit_day t LEFT JOIN hub_sites hs ON hs.id = t.site_id
+      ORDER BY site_name`).all().map((r) => r.site_name).filter(Boolean);
+
+    const where = siteFilter !== 'all' ? 'AND COALESCE(hs.name, t.site_id) = ?' : '';
+    const params = siteFilter !== 'all' ? [siteFilter] : [];
+    const rows = prep(`
+      SELECT t.site_id, COALESCE(hs.name, t.site_id) AS site_name, hs.url AS site_url,
+             t.day, t.selling, t.cost, t.invoice_count, t.credit_note_count, t.synced_at
+      FROM hub_invoice_profit_day t
+      LEFT JOIN hub_sites hs ON hs.id = t.site_id
+      WHERE 1 = 1 ${where}
+      ORDER BY t.day`).all(...params);
+
+    const margin = (profit, selling) => (selling ? (profit / selling) * 100 : 0);
+
+    // Roll each branch up separately, then merge by period, so a period row is
+    // the sum of its branch rows by construction.
+    const bySite = new Map();
+    for (const r of rows) {
+      let site = bySite.get(r.site_id);
+      if (!site) {
+        site = { site_id: r.site_id, site_name: r.site_name, site_url: r.site_url, synced_at: r.synced_at, days: [] };
+        bySite.set(r.site_id, site);
+      }
+      if (r.synced_at && (!site.synced_at || r.synced_at > site.synced_at)) site.synced_at = r.synced_at;
+      site.days.push(r);
+    }
+
+    const byPeriod = new Map();
+    for (const site of bySite.values()) {
+      for (const b of rollUpDays(site.days)[periodType] || []) {
+        let p = byPeriod.get(b.period_key);
+        if (!p) {
+          p = {
+            period_key: b.period_key, period_start: b.period_start, period_end: b.period_end,
+            selling: 0, cost: 0, profit: 0, invoice_count: 0, credit_note_count: 0, branches: [],
+          };
+          byPeriod.set(b.period_key, p);
+        }
+        p.branches.push({
+          site_id: site.site_id,
+          site_name: site.site_name,
+          // The branch's own Invoice Profit report, already scoped to this
+          // period - this IS the drill-down. Null when the hub holds no address
+          // for the branch, so the UI can say "no link" instead of rendering a
+          // dead one.
+          drill_url: site.site_url ? `${site.site_url}/Reports?report=invoice-profit&from=${b.period_start}&to=${b.period_end}` : null,
+          selling: b.selling, cost: b.cost, profit: b.profit, margin: b.margin,
+          invoice_count: b.invoice_count, credit_note_count: b.credit_note_count,
+          synced_at: site.synced_at,
+        });
+        p.selling += b.selling; p.cost += b.cost; p.profit += b.profit;
+        p.invoice_count += b.invoice_count; p.credit_note_count += b.credit_note_count;
+      }
+    }
+
+    const periods = [...byPeriod.values()]
+      .sort((a, b) => b.period_key.localeCompare(a.period_key))
+      .slice(0, limits[periodType])
+      .map((p) => ({ ...p, margin: margin(p.profit, p.selling), branches: p.branches.sort((a, b) => b.profit - a.profit) }));
+
+    const totals = periods.reduce((acc, p) => {
+      acc.selling += p.selling; acc.cost += p.cost; acc.profit += p.profit;
+      acc.invoice_count += p.invoice_count; acc.credit_note_count += p.credit_note_count;
+      return acc;
+    }, { selling: 0, cost: 0, profit: 0, invoice_count: 0, credit_note_count: 0 });
+    totals.margin = margin(totals.profit, totals.selling);
+
+    const synced = [...bySite.values()].map((x) => x.synced_at).filter(Boolean).sort();
+    return {
+      hub_mode: true,
+      period_type: periodType,
+      periods,
+      totals: periods.length ? totals : null,
+      filters: { sites, period_types: PERIOD_TYPES },
+      last_synced_at: synced[synced.length - 1] || null,
+      // An empty rollup means the ETL has not run, NOT that nothing was sold -
+      // say which, rather than showing a convincing R0.
+      empty_reason: periods.length ? null : 'No branch profit totals have reached the hub yet. They arrive with the site sync - check Hub > Sync Log if this persists.',
+    };
+  };
+
   // Shared by the JSON route and the Excel export so the workbook can never
   // drift from what's on screen.
   const loadProfitReport = async (query) => {
@@ -799,18 +899,10 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     const { from, to } = parseProfitRange(req.query);
     try {
       if (process.env.HUB_MODE === 'true') {
-        // The hub holds monthly AR totals, not per-invoice cost — there is no
-        // honest way to compute per-invoice profit here yet. Say so explicitly
-        // rather than returning empty months that would read as "no sales".
-        return res.json({
-          hub_mode: true,
-          unavailable: true,
-          from,
-          to,
-          months: [],
-          totals: null,
-          message: 'Invoice profit runs live against each branch\'s Sage and is not available on the hub yet. Open this report on a branch (site) install.',
-        });
+        // Hub: totals-only, served from the hub_invoice_profit_totals rollup the
+        // ETL pulls from each branch. Per-invoice detail stays at the branch that
+        // raised it — the hub hands back a link instead of a copy.
+        return res.json(buildHubProfitTotals(req.query));
       }
       return res.json(await loadProfitReport(req.query));
     } catch (err) {
@@ -3201,6 +3293,35 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     } catch (err) {
       console.error('[reporting.ar-document-summary] Sage query failed', err.message);
       res.status(503).json({ error: 'Sage query failed' });
+    }
+  });
+
+  // GET /api/reporting/invoice-profit-totals?from=&to= - the hub pulls this from
+  // each branch (hubEtl) to populate hub_invoice_profit_day.
+  //
+  // DAY TOTALS ONLY: no invoices, and no week/month/year either - the hub derives
+  // those from the days, so a rollup can never disagree with the days beneath it.
+  // Aggregated in SQL (4 grouped queries, ~830 rows for two years) rather than by
+  // pulling ~45,000 documents through JS, which timed out on a cold branch.
+  //
+  // The window is caller-controlled so the ETL can run incrementally: a trailing
+  // re-pull each night, not a full two-year scan. Floored at ~2.5 years so a bad
+  // parameter cannot ask a branch for its entire history.
+  router.get('/api/reporting/invoice-profit-totals', reportingRateLimiter, requireReportingToken, async (req, res) => {
+    const pad2 = (n) => String(n).padStart(2, '0');
+    const now = new Date();
+    const isDate = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
+    const to = isDate(req.query.to) ? req.query.to : `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+    let from = isDate(req.query.from) ? req.query.from : `${now.getFullYear() - 1}-01-01`;
+    const floor = new Date(Date.parse(`${to}T00:00:00Z`) - 900 * 86400000).toISOString().slice(0, 10);
+    if (from < floor) from = floor;
+    try {
+      const pool = await getSagePool();
+      const days = await fetchProfitDayTotals({ pool, from, to });
+      res.json({ from, to, days });
+    } catch (err) {
+      console.error(`[reporting.invoice-profit-totals] failed for ${from} to ${to}:`, err.message);
+      res.status(503).json({ error: `Invoice profit day totals unavailable for ${from} to ${to}: ${err.message}` });
     }
   });
 

@@ -192,7 +192,21 @@ export const reportsArticles = [
       {
         type: "callout",
         tone: "warning",
-        text: "This report shows cost and margin, so it sits behind the same monthly-reports permission as Daily Sales Figures. It reads live from the branch's Sage — it isn't available on the hub yet.",
+        text: "This report shows cost and margin, so it sits behind the same monthly-reports permission as Daily Sales Figures.",
+      },
+      { type: "h", text: "On the hub" },
+      {
+      type: "p",
+        text: "The hub shows the same profit figures for every branch, as totals only. Pick **Day**, **Week**, **Month** or **Year**, and each row opens to show the branches that make it up.",
+      },
+      {
+      type: "p",
+        text: "The hub deliberately keeps no invoices \u2014 every branch row carries an **invoices \u2192** link that opens that branch's own Invoice Profit report, already set to that period's dates. The detail stays where it was raised, so there is only ever one copy of it and it cannot drift from the totals.",
+      },
+      {
+      type: "callout",
+      tone: "info",
+        text: "Hub figures arrive with the branch sync, so they are as fresh as the last sync rather than live \u2014 the time of the most recent one is shown beside the period buttons. A branch that has never synced simply does not appear yet.",
       },
     ],
   },

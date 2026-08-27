@@ -17,6 +17,9 @@ import {
   filterDocuments,
   describeFilter,
   fetchDocumentLines,
+  rollUpDays,
+  fetchProfitDayTotals,
+  PERIOD_TYPES,
   isInterBranchName,
   marginPct,
   toSageDate,
@@ -407,5 +410,150 @@ describe('fetchDocumentLines', () => {
     const nearly = { ...invHeader, selling: 942.38 };
     const r = await fetchDocumentLines({ pool: stubPool(nearly, invLines), type: 'invoice', uniq: '1' });
     expect(r.adjustment).toBeNull();
+  });
+});
+
+describe('rollUpDays', () => {
+  // The hub stores DAYS and derives week/month/year from them, so these
+  // derivations are the thing that has to be right — a wrong week boundary or a
+  // year bucket built on ISO years would misstate a branch on the hub.
+  const day = (d, selling, cost, inv = 1, cn = 0) => ({
+    day: d, selling, cost, invoice_count: inv, credit_note_count: cn,
+  });
+
+  it('produces all four period types', () => {
+    const r = rollUpDays([day('2026-07-01', 1000, 900)]);
+    expect(Object.keys(r).sort()).toEqual([...PERIOD_TYPES].sort());
+  });
+
+  it('rolls days into the right week, month and year', () => {
+    const r = rollUpDays([
+      day('2026-07-01', 1000, 900),
+      day('2026-07-02', 2000, 1800),
+      day('2026-07-09', 500, 450),
+    ]);
+    expect(r.day).toHaveLength(3);
+    expect(r.week.map((w) => w.period_key)).toEqual(['2026-W27', '2026-W28']);
+    expect(r.month.map((m) => m.period_key)).toEqual(['2026-07']);
+    expect(r.year.map((y) => y.period_key)).toEqual(['2026']);
+    expect(r.week[0].profit).toBe(300); // 1 + 2 July
+    expect(r.month[0].profit).toBe(350);
+    expect(r.year[0].profit).toBe(350);
+  });
+
+  it('makes every period exactly the sum of its days', () => {
+    const days = [
+      day('2026-01-15', 1000, 900), day('2026-06-30', 2000, 1750),
+      day('2026-12-31', 3000, 2900), day('2025-12-31', 500, 400),
+    ];
+    const r = rollUpDays(days);
+    const total = days.reduce((a, d) => a + (d.selling - d.cost), 0);
+    for (const type of PERIOD_TYPES) {
+      expect(r[type].reduce((a, b) => a + b.profit, 0)).toBe(total);
+    }
+  });
+
+  it('buckets years by CALENDAR year, not ISO year', () => {
+    // 31 Dec 2025 is a Wednesday, so it falls in ISO week 1 of 2026. The week
+    // bucket must say 2026-W01, but the YEAR bucket must say 2025 — the accounts
+    // are cut on calendar years, and an ISO year would move December's trade
+    // into the following financial year.
+    const r = rollUpDays([day('2025-12-31', 1000, 900)]);
+    expect(r.week[0].period_key).toBe('2026-W01');
+    expect(r.year[0].period_key).toBe('2025');
+    expect(r.year[0].period_start).toBe('2025-01-01');
+    expect(r.year[0].period_end).toBe('2025-12-31');
+  });
+
+  it('keeps a New Year week whole under one ISO key', () => {
+    const r = rollUpDays([day('2025-12-31', 1000, 900), day('2026-01-01', 2000, 1800)]);
+    expect(r.week).toHaveLength(1);
+    expect(r.week[0].period_key).toBe('2026-W01');
+    expect(r.week[0].profit).toBe(300);
+    // ...while the years stay separate.
+    expect(r.year.map((y) => y.period_key)).toEqual(['2025', '2026']);
+  });
+
+  it('carries exact calendar bounds, which the hub drill-down link depends on', () => {
+    const r = rollUpDays([day('2026-02-10', 100, 90)]);
+    expect(r.month[0].period_start).toBe('2026-02-01');
+    expect(r.month[0].period_end).toBe('2026-02-28');   // 2026 is not a leap year
+    expect(r.week[0].period_start).toBe('2026-02-09');  // Monday
+    expect(r.week[0].period_end).toBe('2026-02-15');    // Sunday
+    expect(r.day[0].period_start).toBe('2026-02-10');
+    expect(r.day[0].period_end).toBe('2026-02-10');
+  });
+
+  it('gets February right in a leap year', () => {
+    const r = rollUpDays([day('2028-02-10', 100, 90)]);
+    expect(r.month[0].period_end).toBe('2028-02-29');
+  });
+
+  it('computes margin from the summed totals at every level', () => {
+    const r = rollUpDays([day('2026-07-01', 1000, 900), day('2026-07-02', 3000, 2900)]);
+    // 200 profit on 4000 selling = 5%. The mean of the two DAY margins
+    // (10% and 3.33%) would be 6.67% — a quiet day must not weigh the same as
+    // a busy one.
+    expect(round(r.month[0].margin)).toBe(5);
+  });
+
+  it('handles no days without throwing', () => {
+    const r = rollUpDays([]);
+    for (const type of PERIOD_TYPES) expect(r[type]).toEqual([]);
+    expect(rollUpDays(null).day).toEqual([]);
+  });
+});
+
+describe('fetchProfitDayTotals', () => {
+  // Stub pool returning a different recordset per grouped query, so the sign
+  // convention (credit notes subtract) and the day merge can be pinned.
+  const stubPool = (sets) => ({
+    request: () => ({
+      input() { return this; },
+      query(text) {
+        const isCredit = /OECRD/.test(text);
+        const isCost = /EXTICOST|EXTCCOST/.test(text);
+        const key = `${isCredit ? 'cn' : 'inv'}${isCost ? 'Cost' : 'Sell'}`;
+        return Promise.resolve({ recordset: sets[key] || [] });
+      },
+    }),
+  });
+
+  it('subtracts credit notes from selling and cost', async () => {
+    const days = await fetchProfitDayTotals({
+      pool: stubPool({
+        invSell: [{ ymd: 20260701, amount: 1000, docs: 3 }],
+        invCost: [{ ymd: 20260701, amount: 900 }],
+        cnSell: [{ ymd: 20260701, amount: 200, docs: 1 }],
+        cnCost: [{ ymd: 20260701, amount: 180 }],
+      }),
+      from: '2026-07-01', to: '2026-07-31',
+    });
+    expect(days).toHaveLength(1);
+    expect(days[0]).toMatchObject({
+      day: '2026-07-01', selling: 800, cost: 720, profit: 80,
+      invoice_count: 3, credit_note_count: 1,
+    });
+  });
+
+  it('returns days sorted, merging a day that only has credit notes', async () => {
+    const days = await fetchProfitDayTotals({
+      pool: stubPool({
+        invSell: [{ ymd: 20260703, amount: 500, docs: 1 }],
+        invCost: [{ ymd: 20260703, amount: 450 }],
+        cnSell: [{ ymd: 20260701, amount: 100, docs: 1 }],
+        cnCost: [{ ymd: 20260701, amount: 90 }],
+      }),
+      from: '2026-07-01', to: '2026-07-31',
+    });
+    expect(days.map((d) => d.day)).toEqual(['2026-07-01', '2026-07-03']);
+    // A day of pure returns is a negative day, not a missing one.
+    expect(days[0].selling).toBe(-100);
+    expect(days[0].profit).toBe(-10);
+  });
+
+  it('refuses a reversed date range', async () => {
+    await expect(fetchProfitDayTotals({ pool: stubPool({}), from: '2026-07-31', to: '2026-07-01' }))
+      .rejects.toThrow(/is after the "to" date/);
   });
 });
