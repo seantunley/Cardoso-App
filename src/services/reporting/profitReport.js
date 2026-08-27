@@ -297,24 +297,56 @@ const addDoc = (t, d) => {
 };
 const sealTotals = (t) => ({ ...t, margin: marginPct(t.profit, t.selling) });
 
+// Last calendar day of a 'YYYY-MM'.
+const monthEnd = (ym) => {
+  const y = Number(ym.slice(0, 4));
+  const m = Number(ym.slice(5, 7));
+  return `${ym}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, '0')}`;
+};
+
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const monthLabel = (ym) => `${MONTH_NAMES[Number(ym.slice(5, 7)) - 1]} ${ym.slice(0, 4)}`;
 const dayLabel = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString('en-ZA', { weekday: 'short', day: '2-digit', month: 'short' });
+
+// Every 'YYYY-MM' from `from` to `to` inclusive.
+const monthsBetween = (from, to) => {
+  const out = [];
+  let y = Number(from.slice(0, 4));
+  let m = Number(from.slice(5, 7));
+  const ty = Number(to.slice(0, 4));
+  const tm = Number(to.slice(5, 7));
+  while ((y < ty || (y === ty && m <= tm)) && out.length < 600) {
+    out.push(`${y}-${String(m).padStart(2, '0')}`);
+    m += 1;
+    if (m > 12) { m = 1; y += 1; }
+  }
+  return out;
+};
 
 /**
  * Nest flat documents into Month -> ISO Week -> Day -> documents, with selling,
  * cost, profit, margin and document counts at every level.
  *
- * ISO WEEKS STRADDLE MONTHS. A week that starts in one month and ends in the
- * next is emitted under BOTH months, each carrying only the days that fall in
- * that month, and flagged `partial: true` with the portion of the week covered.
- * That keeps the arithmetic honest — every level is exactly the sum of the
- * level below it, and a month total is never inflated by days outside it. The UI
- * labels partial weeks so nobody reads one as a full trading week.
+ * PARTIAL PERIODS. A month or week block can hold less than its whole calendar
+ * span for two reasons, and both must be visible or the totals read as more than
+ * they are:
+ *   - an ISO week straddling a month boundary is emitted under BOTH months, each
+ *     carrying only its own month's days;
+ *   - the requested range starts or ends mid-period, so a Thursday-to-Friday
+ *     range covers two days of a seven-day week.
+ * Either way the block is flagged `partial`, with `covered_start`/`covered_end`
+ * saying what it actually spans. Without the second case a Thu-Fri range showed
+ * a full Mon-Sun span with no marker, which reads as a complete trading week.
+ *
+ * ZERO-ACTIVITY MONTHS are materialised when the caller passes the range, so a
+ * January-March report with no February trade shows February at R0 rather than
+ * omitting it — a month that sold nothing is a fact about the range, and leaving
+ * it out also skewed the monthly average in rangeStats().
  *
  * @param {object[]} documents
+ * @param {{ from?: string, to?: string }} [range]
  */
-export function buildProfitTree(documents) {
+export function buildProfitTree(documents, range = {}) {
   /** @type {Map<string, any>} */
   const months = new Map();
 
@@ -346,42 +378,70 @@ export function buildProfitTree(documents) {
   }
 
   const isoDay = (dt) => dt.toISOString().slice(0, 10);
+  const { from, to } = range;
+
+  // Materialise every month the caller asked for, so a month with no trade is
+  // shown at zero rather than silently missing. Only when documents exist at
+  // all — an empty result must stay empty so the UI shows its "no invoices"
+  // state instead of a page of zeroes.
+  if (from && to && months.size > 0) {
+    for (const ym of monthsBetween(from.slice(0, 7), to.slice(0, 7))) {
+      if (!months.has(ym)) months.set(ym, { month: ym, label: monthLabel(ym), weeks: new Map(), totals: emptyTotals() });
+    }
+  }
 
   return [...months.values()]
     .sort((a, b) => a.month.localeCompare(b.month))
-    .map((m) => ({
-      month: m.month,
-      label: m.label,
-      totals: sealTotals(m.totals),
-      weeks: [...m.weeks.values()]
-        .sort((a, b) => a.key.localeCompare(b.key))
-        .map((w) => {
-          // Calendar span of the whole ISO week vs the part of it inside this
-          // month — that difference is what makes a week "partial".
-          const weekStart = isoDay(dateFromIso(w.iso_year, w.iso_week, 1));
-          const weekEnd = isoDay(dateFromIso(w.iso_year, w.iso_week, 7));
-          const days = [...w.days.values()].sort((a, b) => a.day.localeCompare(b.day));
-          const partial = weekStart.slice(0, 7) !== weekEnd.slice(0, 7);
-          return {
-            key: w.key,
-            iso_year: w.iso_year,
-            iso_week: w.iso_week,
-            label: `Week ${w.iso_week}`,
-            week_start: weekStart,
-            week_end: weekEnd,
-            // True when the ISO week spans a month boundary, so this block holds
-            // only the part of it that belongs to `m.month`.
-            partial,
-            totals: sealTotals(w.totals),
-            days: days.map((dd) => ({
-              day: dd.day,
-              label: dd.label,
-              totals: sealTotals(dd.totals),
-              documents: dd.documents,
-            })),
-          };
-        }),
-    }));
+    .map((m) => {
+      const monthStart = `${m.month}-01`;
+      const monthEndDay = monthEnd(m.month);
+      // What of this month the range actually covers.
+      const mCovStart = from && from > monthStart ? from : monthStart;
+      const mCovEnd = to && to < monthEndDay ? to : monthEndDay;
+      return {
+        month: m.month,
+        label: m.label,
+        month_start: monthStart,
+        month_end: monthEndDay,
+        covered_start: mCovStart,
+        covered_end: mCovEnd,
+        // True when the range clips this month — the totals are for part of it.
+        partial: mCovStart !== monthStart || mCovEnd !== monthEndDay,
+        totals: sealTotals(m.totals),
+        weeks: [...m.weeks.values()]
+          .sort((a, b) => a.key.localeCompare(b.key))
+          .map((w) => {
+            const weekStart = isoDay(dateFromIso(w.iso_year, w.iso_week, 1));
+            const weekEnd = isoDay(dateFromIso(w.iso_year, w.iso_week, 7));
+            const days = [...w.days.values()].sort((a, b) => a.day.localeCompare(b.day));
+            // The week's span narrowed by BOTH the month it sits under and the
+            // requested range — either can clip it, and both make it partial.
+            let covStart = weekStart > mCovStart ? weekStart : mCovStart;
+            let covEnd = weekEnd < mCovEnd ? weekEnd : mCovEnd;
+            if (covStart > covEnd) { covStart = weekStart; covEnd = weekEnd; }
+            return {
+              key: w.key,
+              iso_year: w.iso_year,
+              iso_week: w.iso_week,
+              label: `Week ${w.iso_week}`,
+              week_start: weekStart,
+              week_end: weekEnd,
+              covered_start: covStart,
+              covered_end: covEnd,
+              // True when this block holds less than the whole ISO week: it
+              // straddles a month boundary, or the range clips it, or both.
+              partial: covStart !== weekStart || covEnd !== weekEnd,
+              totals: sealTotals(w.totals),
+              days: days.map((dd) => ({
+                day: dd.day,
+                label: dd.label,
+                totals: sealTotals(dd.totals),
+                documents: dd.documents,
+              })),
+            };
+          }),
+      };
+    });
 }
 
 /**
@@ -392,9 +452,17 @@ export function buildProfitTree(documents) {
  * strip still reads correctly on a Sunday, over a public holiday, or when the
  * range ends in the past.
  *
+ * The week and month figures are only genuinely "to date" when the range reaches
+ * back to the start of that week/month. Ask for 20-27 August and the month card
+ * would otherwise call eight days' trade "month to date", hiding 1-19 August
+ * behind a label that claims completeness. When the range clips the period, the
+ * figure is still returned but flagged `complete: false`, and the UI relabels it
+ * as range-scoped instead of pretending.
+ *
  * @param {object[]} documents
+ * @param {{ from?: string, to?: string }} [range]
  */
-export function summariseProfit(documents) {
+export function summariseProfit(documents, range = {}) {
   const grand = emptyTotals();
   for (const d of documents) addDoc(grand, d);
 
@@ -412,17 +480,32 @@ export function summariseProfit(documents) {
   }
 
   const { year: ly, week: lw } = isoWeek(latest);
+  const from = range.from || null;
+  // Start of the anchor week / month. If the requested range begins after
+  // either, the matching card covers only part of the period it names.
+  const weekStart = dateFromIso(ly, lw, 1).toISOString().slice(0, 10);
+  const monthStart = `${latest.slice(0, 7)}-01`;
+  const weekComplete = !from || from <= weekStart;
+  const monthComplete = !from || from <= monthStart;
   return {
     totals: sealTotals(grand),
     latest_day: latest,
     day_to_date: scoped((d) => d.date === latest),
     // Week/month to date = everything in that week/month UP TO the latest day,
     // never the whole week (which would count days the range doesn't cover).
-    week_to_date: scoped((d) => {
-      const w = isoWeek(d.date);
-      return w.year === ly && w.week === lw && d.date <= latest;
-    }),
-    month_to_date: scoped((d) => d.date.slice(0, 7) === latest.slice(0, 7) && d.date <= latest),
+    week_to_date: {
+      ...scoped((d) => {
+        const w = isoWeek(d.date);
+        return w.year === ly && w.week === lw && d.date <= latest;
+      }),
+      complete: weekComplete,
+      covered_from: weekComplete ? weekStart : from,
+    },
+    month_to_date: {
+      ...scoped((d) => d.date.slice(0, 7) === latest.slice(0, 7) && d.date <= latest),
+      complete: monthComplete,
+      covered_from: monthComplete ? monthStart : from,
+    },
   };
 }
 
@@ -478,21 +561,21 @@ export function describeFilter({ losses = false, min = null, max = null, unit = 
 // other three, so a rollup can never disagree with the days it is made of.
 export const PERIOD_TYPES = ['day', 'week', 'month', 'year'];
 
-// Last calendar day of a 'YYYY-MM'.
-const monthEnd = (ym) => {
-  const y = Number(ym.slice(0, 4));
-  const m = Number(ym.slice(5, 7));
-  return `${ym}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, '0')}`;
-};
-
 // Inter-branch exclusion, in SQL this time. LOWER() is not optional: this Sage
 // database has a CASE-SENSITIVE collation, so an unwrapped LIKE '%Inter Branch%'
 // silently matches only one spelling. Same three spellings as
 // isInterBranchName() above, which is what the per-invoice path uses.
+// ISNULL is not decoration. These run under `WHERE NOT (...)`, and in SQL a
+// LIKE against NULL is UNKNOWN, so NOT(UNKNOWN) is UNKNOWN and the row is
+// DROPPED. A document whose customer has no ARCUS row (or a null name) would
+// therefore vanish from the hub totals while the per-invoice report kept it —
+// isInterBranchName(null) is false — and the hub would quietly disagree with the
+// branch. Coalescing to '' makes the predicate false instead of unknown, so the
+// document is kept, matching the per-invoice path exactly.
 const IB_SQL = (alias) => `(
-  LOWER(${alias}.NAMECUST) LIKE '%inter branch%' OR
-  LOWER(${alias}.NAMECUST) LIKE '%inter-branch%' OR
-  LOWER(${alias}.NAMECUST) LIKE '%interbranch%'
+  LOWER(ISNULL(${alias}.NAMECUST, '')) LIKE '%inter branch%' OR
+  LOWER(ISNULL(${alias}.NAMECUST, '')) LIKE '%inter-branch%' OR
+  LOWER(ISNULL(${alias}.NAMECUST, '')) LIKE '%interbranch%'
 )`;
 
 /**
@@ -628,6 +711,17 @@ export function rollUpDays(days) {
  * that sold nothing isn't the best month. Each carries its own margin so the
  * comparison is still visible.
  *
+ * PARTIAL MONTHS ARE NOT COMPARED. A range of 20 August to 30 September holds
+ * twelve days of August against a whole September; ranking those together would
+ * regularly crown the clipped boundary month "weakest" for no reason other than
+ * being short, and would drag the monthly average down with it. Best, weakest
+ * and the average are computed over COMPLETE months only, and `partial_months`
+ * says how many were set aside so the UI can state it rather than hide it.
+ *
+ * When fewer than two complete months exist there is nothing meaningful to
+ * compare, so best/weakest come back null and only the average is offered — over
+ * whatever months there are, flagged by `average_includes_partial`.
+ *
  * Returns null for a single-month range, which is the UI's signal to keep
  * showing the to-date cards.
  *
@@ -636,18 +730,27 @@ export function rollUpDays(days) {
 export function rangeStats(months) {
   if (!months || months.length < 2) return null;
 
-  const byProfit = [...months].sort((a, b) => b.totals.profit - a.totals.profit);
-  const brief = (m) => ({ month: m.month, label: m.label, totals: m.totals });
+  const complete = months.filter((m) => !m.partial);
+  const partialCount = months.length - complete.length;
+  // Compare like with like where we can; fall back to everything when we can't,
+  // and say which happened.
+  const comparable = complete.length >= 2 ? complete : months;
+  const rankable = complete.length >= 2;
 
-  const n = months.length;
-  const sumOf = (key) => months.reduce((s, m) => s + m.totals[key], 0);
+  const byProfit = [...comparable].sort((a, b) => b.totals.profit - a.totals.profit);
+  const brief = (m) => ({ month: m.month, label: m.label, partial: !!m.partial, totals: m.totals });
+
+  const n = comparable.length;
+  const sumOf = (key) => comparable.reduce((s, m) => s + m.totals[key], 0);
   const avgSelling = sumOf('selling') / n;
   const avgProfit = sumOf('profit') / n;
 
   return {
     month_count: n,
-    best_month: brief(byProfit[0]),
-    weakest_month: brief(byProfit[byProfit.length - 1]),
+    partial_months: partialCount,
+    average_includes_partial: !rankable && partialCount > 0,
+    best_month: rankable ? brief(byProfit[0]) : null,
+    weakest_month: rankable ? brief(byProfit[byProfit.length - 1]) : null,
     monthly_average: {
       selling: avgSelling,
       cost: sumOf('cost') / n,
@@ -677,8 +780,8 @@ export async function buildProfitReport({ pool, from, to, filters = {} }) {
   // rows underneath it.
   const documents = filterDocuments(all, filters);
   const filterLabel = describeFilter(filters);
-  const summary = summariseProfit(documents);
-  const months = buildProfitTree(documents);
+  const summary = summariseProfit(documents, { from, to });
+  const months = buildProfitTree(documents, { from, to });
   return {
     from,
     to,

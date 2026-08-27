@@ -557,3 +557,143 @@ describe('fetchProfitDayTotals', () => {
       .rejects.toThrow(/is after the "to" date/);
   });
 });
+
+// ── Codex review follow-ups (PR #553) ───────────────────────────────────────
+// One regression test per finding, so none of them can quietly come back.
+
+describe('range-aware periods (Codex #553)', () => {
+  const doc2 = (date, n, selling, cost) => doc(date, n, selling, cost);
+
+  it('marks a week the RANGE clips as partial, not just one crossing a month', () => {
+    // Thu 2 - Fri 3 July 2026, inside ISO week 27 (Mon 29 Jun - Sun 5 Jul).
+    // Week 27 also crosses a month boundary here, so use a mid-month week to
+    // isolate the range-clipping case: week 28 is Mon 6 - Sun 12 July.
+    const tree = buildProfitTree(
+      [doc2('2026-07-09', 'IN1', 1000, 900)],
+      { from: '2026-07-09', to: '2026-07-10' },
+    );
+    const week = tree[0].weeks[0];
+    expect(week.iso_week).toBe(28);
+    expect(week.week_start).toBe('2026-07-06');
+    expect(week.week_end).toBe('2026-07-12');
+    expect(week.partial).toBe(true);            // was false before the fix
+    expect(week.covered_start).toBe('2026-07-09');
+    expect(week.covered_end).toBe('2026-07-10');
+  });
+
+  it('leaves a week untouched by the range as complete', () => {
+    const tree = buildProfitTree(
+      [doc2('2026-07-09', 'IN1', 1000, 900)],
+      { from: '2026-07-01', to: '2026-07-31' },
+    );
+    expect(tree[0].weeks[0].partial).toBe(false);
+  });
+
+  it('flags a month the range clips, and reports what it covers', () => {
+    const tree = buildProfitTree(
+      [doc2('2026-08-25', 'IN1', 1000, 900)],
+      { from: '2026-08-20', to: '2026-08-27' },
+    );
+    expect(tree[0].partial).toBe(true);
+    expect(tree[0].covered_start).toBe('2026-08-20');
+    expect(tree[0].covered_end).toBe('2026-08-27');
+  });
+
+  it('materialises a month with no trade so it is not silently missing', () => {
+    const tree = buildProfitTree(
+      [doc2('2026-01-15', 'IN1', 1000, 900), doc2('2026-03-15', 'IN2', 2000, 1800)],
+      { from: '2026-01-01', to: '2026-03-31' },
+    );
+    expect(tree.map((m) => m.month)).toEqual(['2026-01', '2026-02', '2026-03']);
+    expect(tree[1].totals.profit).toBe(0);
+    expect(tree[1].totals.invoice_count).toBe(0);
+    expect(tree[1].weeks).toEqual([]);
+  });
+
+  it('still returns nothing at all when there are no documents', () => {
+    // An empty range must stay empty rather than become a page of zero months.
+    expect(buildProfitTree([], { from: '2026-01-01', to: '2026-03-31' })).toEqual([]);
+  });
+});
+
+describe('rangeStats with partial months (Codex #553)', () => {
+  const mkMonths = (from, to, docs) => buildProfitTree(docs, { from, to });
+
+  it('excludes clipped boundary months from best/weakest', () => {
+    // 20 Aug - 30 Sep: August is 12 days and would otherwise be "weakest" purely
+    // for being short.
+    const months = mkMonths('2026-08-20', '2026-09-30', [
+      doc('2026-08-25', 'IN1', 1000, 950),   // profit 50, partial month
+      doc('2026-09-15', 'IN2', 5000, 4500),  // profit 500, whole month
+    ]);
+    expect(months[0].partial).toBe(true);
+    expect(months[1].partial).toBe(false);
+    const st = rangeStats(months);
+    // Only ONE complete month, so nothing is comparable.
+    expect(st.best_month).toBeNull();
+    expect(st.weakest_month).toBeNull();
+    expect(st.partial_months).toBe(1);
+  });
+
+  it('ranks among complete months and says how many were set aside', () => {
+    const months = mkMonths('2026-08-20', '2026-10-31', [
+      doc('2026-08-25', 'IN0', 1000, 950),   // partial August
+      doc('2026-09-15', 'IN1', 5000, 4500),  // whole September, profit 500
+      doc('2026-10-15', 'IN2', 4000, 3800),  // whole October,  profit 200
+    ]);
+    const st = rangeStats(months);
+    expect(st.best_month.month).toBe('2026-09');
+    expect(st.weakest_month.month).toBe('2026-10');
+    expect(st.partial_months).toBe(1);
+    // The average covers the two comparable months, not the clipped one.
+    expect(st.month_count).toBe(2);
+    expect(st.monthly_average.profit).toBe(350);
+  });
+
+  it('counts a zero-activity month in the average', () => {
+    const months = mkMonths('2026-01-01', '2026-03-31', [
+      doc('2026-01-15', 'IN1', 1000, 700),   // profit 300
+      doc('2026-03-15', 'IN2', 1000, 700),   // profit 300
+    ]);
+    const st = rangeStats(months);
+    expect(st.month_count).toBe(3);                 // February included
+    expect(st.monthly_average.profit).toBe(200);    // 600 / 3, not 600 / 2
+    expect(st.weakest_month.month).toBe('2026-02'); // the month that sold nothing
+    expect(st.weakest_month.totals.profit).toBe(0);
+  });
+});
+
+describe('to-date cards honesty (Codex #553)', () => {
+  const docs = [doc('2026-08-25', 'IN1', 1000, 900), doc('2026-08-27', 'IN2', 2000, 1800)];
+
+  it('flags the month as incomplete when the range starts mid-month', () => {
+    // 20 Aug still covers the whole of ISO week 35 (Mon 24 - Sun 30), so only
+    // the MONTH card is clipped here. This is the case Codex called out: eight
+    // days of trade labelled "month to date".
+    const s = summariseProfit(docs, { from: '2026-08-20', to: '2026-08-27' });
+    expect(s.month_to_date.complete).toBe(false);
+    expect(s.month_to_date.covered_from).toBe('2026-08-20');
+    expect(s.week_to_date.complete).toBe(true);
+  });
+
+  it('flags the week as incomplete when the range starts mid-week', () => {
+    const s = summariseProfit(docs, { from: '2026-08-26', to: '2026-08-27' });
+    expect(s.week_to_date.complete).toBe(false);
+    expect(s.week_to_date.covered_from).toBe('2026-08-26');
+    expect(s.month_to_date.complete).toBe(false);
+  });
+
+  it('reports them as complete when the range covers the whole period', () => {
+    const s = summariseProfit(docs, { from: '2026-08-01', to: '2026-08-31' });
+    expect(s.month_to_date.complete).toBe(true);
+    expect(s.month_to_date.covered_from).toBe('2026-08-01');
+    // Week 35 starts Mon 24 Aug, which is inside a 1-31 Aug range.
+    expect(s.week_to_date.complete).toBe(true);
+  });
+
+  it('treats a range-less call as complete, preserving old behaviour', () => {
+    const s = summariseProfit(docs);
+    expect(s.month_to_date.complete).toBe(true);
+    expect(s.week_to_date.complete).toBe(true);
+  });
+});

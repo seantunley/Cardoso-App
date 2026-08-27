@@ -540,6 +540,12 @@ export async function buildInvoiceProfitXlsx(report) {
   const s = wb.addWorksheet('Summary');
   s.addRow(['Invoice Profit']);
   s.addRow([report?.site_name || '', `${report?.from || ''} to ${report?.to || ''}`, `generated ${dateOnly()}`]);
+  // A filtered workbook holds only the matching invoices. Emailed on, its
+  // reduced totals would otherwise read as the whole period — so the filter
+  // travels in the metadata, not just in the UI that produced it.
+  if (report?.filter?.active) {
+    s.addRow([`FILTERED: ${report.filter.label}`, `${report.filter.matched} of ${report.filter.of_invoices} invoices`, 'credit notes excluded']);
+  }
   s.addRow([]);
   const sHeader = s.rowCount + 1;
   s.addRow(['Level', 'Period', 'Invoices', 'Credit notes', 'Selling (ex-VAT)', 'Cost', 'Profit', 'Margin %']);
@@ -572,7 +578,7 @@ export async function buildInvoiceProfitXlsx(report) {
         for (const doc of day.documents || []) {
           d.addRow([
             doc.date,
-            `W${w.iso_week}`,
+            `${w.iso_year}-W${String(w.iso_week).padStart(2, '0')}`,
             doc.doc_type === 'credit_note' ? 'Credit note' : 'Invoice',
             doc.doc_number,
             doc.customer_code,
@@ -595,6 +601,9 @@ export async function buildInvoiceProfitXlsx(report) {
   [
     ['Invoice Profit — how these numbers are built'],
     [],
+    ...(report?.filter?.active
+      ? [['Filter', `${report.filter.label}. ${report.filter.matched} of ${report.filter.of_invoices} invoices match; every figure in this workbook covers those only. Credit notes are excluded from a filtered view because each one reverses a sale and so always shows a negative profit.`], []]
+      : []),
     ['Selling', 'Sage document net excluding VAT (OEINVH.INVNETNOTX / OECRDH.CRDNETNOTX).'],
     ['Cost', 'The cost Sage costed onto the document when it was raised (OEINVD.EXTICOST / OECRDD.EXTCCOST) — not the item master\'s current cost, so this report does not restate itself over time.'],
     ['Profit', 'Selling less Cost. Margin % is Profit as a percentage of Selling.'],

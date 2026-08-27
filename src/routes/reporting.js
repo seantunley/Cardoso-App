@@ -26,6 +26,7 @@ import { analyseInvoiceCredit } from '../lib/creditAnalysis.js';
 import { getCreditLogicForAnalysis } from '../services/creditLogic.js';
 import { ageOpenItems, BUCKET_KEYS, AP_SCHEME } from '../services/aging.js';
 import { buildProfitReport, fetchDocumentLines, fetchProfitDayTotals, rollUpDays, PERIOD_TYPES } from '../services/reporting/profitReport.js';
+import { siteIdFilter } from '../lib/hubSiteScope.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -795,7 +796,15 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   // No invoices on the hub by design: every branch row carries the URL and the
   // exact date range needed to open that period in that branch's own report, so
   // the detail has one home and cannot drift from the totals.
-  const buildHubProfitTotals = (query) => {
+  // Takes req/res, not just the query: hub_user_allowed_sites restricts which
+  // branches a user may see, and that scoping depends on WHO is asking. Cost and
+  // margin are the most confidential figures the hub holds, so the allow-list is
+  // applied to the data query AND to the branch list the filter dropdown offers
+  // — otherwise a restricted user learns the other branches' names from the
+  // filter even if the numbers are withheld.
+  const buildHubProfitTotals = (req, res) => {
+    const query = req.query || {};
+    const scope = siteIdFilter(req, res, 't.site_id');
     const periodType = PERIOD_TYPES.includes(String(query.period || '')) ? String(query.period) : 'month';
     const siteFilter = String(query.site || 'all').trim();
     // How far back each period type is worth showing.
@@ -804,7 +813,8 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     const sites = prep(`
       SELECT DISTINCT COALESCE(hs.name, t.site_id) AS site_name
       FROM hub_invoice_profit_day t LEFT JOIN hub_sites hs ON hs.id = t.site_id
-      ORDER BY site_name`).all().map((r) => r.site_name).filter(Boolean);
+      WHERE 1 = 1 ${scope.sql}
+      ORDER BY site_name`).all(...scope.params).map((r) => r.site_name).filter(Boolean);
 
     const where = siteFilter !== 'all' ? 'AND COALESCE(hs.name, t.site_id) = ?' : '';
     const params = siteFilter !== 'all' ? [siteFilter] : [];
@@ -813,8 +823,8 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
              t.day, t.selling, t.cost, t.invoice_count, t.credit_note_count, t.synced_at
       FROM hub_invoice_profit_day t
       LEFT JOIN hub_sites hs ON hs.id = t.site_id
-      WHERE 1 = 1 ${where}
-      ORDER BY t.day`).all(...params);
+      WHERE 1 = 1 ${scope.sql} ${where}
+      ORDER BY t.day`).all(...scope.params, ...params);
 
     const margin = (profit, selling) => (selling ? (profit / selling) * 100 : 0);
 
@@ -902,7 +912,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
         // Hub: totals-only, served from the hub_invoice_profit_totals rollup the
         // ETL pulls from each branch. Per-invoice detail stays at the branch that
         // raised it — the hub hands back a link instead of a copy.
-        return res.json(buildHubProfitTotals(req.query));
+        return res.json(buildHubProfitTotals(req, res));
       }
       return res.json(await loadProfitReport(req.query));
     } catch (err) {

@@ -76,12 +76,13 @@ const Margin = ({ v, profit, bold }) => (
 // ── To-date strip ───────────────────────────────────────────────────────────
 // Anchored on the last day with activity in the range, not on today, so it still
 // reads correctly on a Sunday or when the range ends in the past.
-function ToDateCard({ label, sub, totals, accent }) {
+function ToDateCard({ label, sub, totals, accent, note }) {
   if (!totals) return null;
   return (
     <div className="bg-card p-4" style={{ border: '1px solid hsl(var(--border))', borderRadius: '12px' }}>
       <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">{label}</div>
       {sub && <div className="mt-0.5 text-[11px] text-muted-subtle">{sub}</div>}
+      {note && <div className="mt-0.5 text-[11px]" style={{ color: 'var(--phosphor)' }}>{note}</div>}
       <div className="mt-3 font-display text-2xl leading-none" style={accent ? { color: 'var(--phosphor)' } : undefined}>
         <Profit v={totals.profit} bold />
       </div>
@@ -389,6 +390,26 @@ export default function InvoiceProfit() {
     }
   };
 
+  // Print expands everything first. Printing the default view produced month
+  // and week totals only — a per-invoice report that prints no invoices — because
+  // unexpanded levels are simply not in the DOM. Invoice LINE detail stays shut:
+  // that is a deliberate lookup, not part of the report.
+  const printAll = () => {
+    const open = {};
+    for (const m of months) {
+      open[m.month] = true;
+      for (const w of m.weeks) {
+        const wKey = `${m.month}/${w.key}`;
+        open[wKey] = true;
+        for (const d of w.days) open[`${wKey}/${d.day}`] = true;
+      }
+    }
+    setExpanded(open);
+    // One frame for React to commit those rows before the print dialog snapshots
+    // the page; without it the browser prints the pre-expansion DOM.
+    requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
+  };
+
   const generatedAtFmt = new Date().toLocaleString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   // A single month is open by default; with several in range they all start
   // closed so the page opens on month totals rather than a wall of weeks.
@@ -405,7 +426,7 @@ export default function InvoiceProfit() {
       onExportCsv={!isHub && months.length ? exportCsv : undefined}
       onExportExcel={!isHub && months.length ? exportExcel : undefined}
       onExportPdf={!isHub && months.length ? exportPdf : undefined}
-      onPrint={() => window.print()}
+      onPrint={isHub ? () => window.print() : printAll}
       isLoading={isLoading}
       error={error?.message}
       printHeader={
@@ -505,6 +526,16 @@ export default function InvoiceProfit() {
           {activeFilter
             ? `No invoices between ${from} and ${to} match: ${activeFilter.label.toLowerCase()}.`
             : `No posted invoices between ${from} and ${to}.`}
+          {/* A range holding nothing BUT inter-branch transfers would otherwise
+              read as "no trade at all", while the report quietly dropped the
+              documents it promises to account for. */}
+          {!!excluded?.count && (
+            <div className="mt-3 text-xs">
+              {fmtCount(excluded.count)} inter-branch transfer {excluded.count === 1 ? 'document was' : 'documents were'} excluded from this range
+              {' '}(<span className="tabular-nums">R {fmtRSigned(excluded.selling)}</span> selling).
+              {' '}{excluded.reason}
+            </div>
+          )}
         </div>
       ) : months.length > 0 ? (
         <>
@@ -518,15 +549,41 @@ export default function InvoiceProfit() {
             {rangeStats ? (
               <>
                 <ToDateCard label="Range total" sub={`${from} → ${to}`} totals={totals} accent />
-                <ToDateCard label="Best month" sub={rangeStats.best_month?.label} totals={rangeStats.best_month?.totals} />
-                <ToDateCard label="Weakest month" sub={rangeStats.weakest_month?.label} totals={rangeStats.weakest_month?.totals} />
-                <ToDateCard label="Monthly average" sub={`across ${rangeStats.month_count} months`} totals={rangeStats.monthly_average} />
+                {/* Null when fewer than two WHOLE months are in range — a
+                    clipped boundary month is not comparable to a full one. */}
+                {rangeStats.best_month
+                  ? <ToDateCard label="Best month" sub={rangeStats.best_month.label} totals={rangeStats.best_month.totals} />
+                  : <ToDateCard label="Best month" sub="needs two whole months" totals={{ selling: 0, cost: 0, profit: 0, margin: 0 }} />}
+                {rangeStats.weakest_month
+                  ? <ToDateCard label="Weakest month" sub={rangeStats.weakest_month.label} totals={rangeStats.weakest_month.totals} />
+                  : <ToDateCard label="Weakest month" sub="needs two whole months" totals={{ selling: 0, cost: 0, profit: 0, margin: 0 }} />}
+                <ToDateCard
+                  label="Monthly average"
+                  sub={`across ${rangeStats.month_count} ${rangeStats.month_count === 1 ? 'month' : 'months'}`}
+                  note={rangeStats.partial_months && !rangeStats.average_includes_partial
+                    ? `${rangeStats.partial_months} part-month${rangeStats.partial_months === 1 ? '' : 's'} excluded`
+                    : rangeStats.average_includes_partial ? 'includes part-months' : null}
+                  totals={rangeStats.monthly_average}
+                />
               </>
             ) : (
               <>
                 <ToDateCard label="Day to date" sub={data?.latest_day} totals={data?.day_to_date} />
-                <ToDateCard label="Week to date" sub={data?.latest_day ? `to ${data.latest_day}` : ''} totals={data?.week_to_date} />
-                <ToDateCard label="Month to date" sub={data?.latest_day ? `to ${data.latest_day}` : ''} totals={data?.month_to_date} />
+                {/* Only call it "to date" when the range actually reaches the
+                    start of the period. Ask for 20-27 August and the month card
+                    holds eight days, not the month — so it says so. */}
+                <ToDateCard
+                  label={data?.week_to_date?.complete === false ? 'Week (in range)' : 'Week to date'}
+                  sub={data?.latest_day ? `to ${data.latest_day}` : ''}
+                  note={data?.week_to_date?.complete === false ? `from ${data.week_to_date.covered_from} only` : null}
+                  totals={data?.week_to_date}
+                />
+                <ToDateCard
+                  label={data?.month_to_date?.complete === false ? 'Month (in range)' : 'Month to date'}
+                  sub={data?.latest_day ? `to ${data.latest_day}` : ''}
+                  note={data?.month_to_date?.complete === false ? `from ${data.month_to_date.covered_from} only` : null}
+                  totals={data?.month_to_date}
+                />
                 <ToDateCard label="Range total" sub={`${from} → ${to}`} totals={totals} accent />
               </>
             )}
@@ -558,6 +615,14 @@ export default function InvoiceProfit() {
                       >
                         <td className="px-3 py-2 font-display text-base" colSpan={2}>
                           <Chevron open={mOpen} /> {m.label}
+                          {/* The range clips this month, so its total is for
+                              part of it — and it is left out of the best/weakest
+                              comparison for exactly that reason. */}
+                          {m.partial && (
+                            <span className="ml-2 font-mono text-[10px] uppercase tracking-wider text-phosphor">
+                              part · {m.covered_start} – {m.covered_end}
+                            </span>
+                          )}
                         </td>
                         <TotalsCells totals={m.totals} bold />
                       </tr>
