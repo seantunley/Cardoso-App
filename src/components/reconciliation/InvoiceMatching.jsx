@@ -460,7 +460,15 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
       if (filterStatus !== 'all') {
         const bypassForMissingTab = activeTab === 'missingPods' && e.is_missing_pod;
         if (!bypassForMissingTab) {
-          if (filterStatus === 'not_found' && e.extraction_status !== 'not_found') return false;
+          // "OCR failed" is the whole failure bucket, not just not_found:
+          // OCR emits BOTH `not_found` (ran, no invoice matched) and
+          // `failed` (the OCR call itself errored — the red "Failed"
+          // badge). The stat counts and needsAttention() both treat the
+          // two together, so the filter must too — otherwise genuinely
+          // failed rows silently vanish when the operator filters for them.
+          if (filterStatus === 'not_found'
+            && e.extraction_status !== 'not_found'
+            && e.extraction_status !== 'failed') return false;
           if (filterStatus === 'pending' && e.extraction_status !== 'pending') return false;
         }
       }
@@ -504,7 +512,10 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
           </h3>
         </div>
         <div className="flex items-center gap-3 font-mono text-[10px] uppercase tracking-[0.15em]">
-          <span className="text-accent">◐ {stats?.notFound || 0} OCR failed</span>
+          {/* "OCR failed" = the whole failure bucket (not_found + failed),
+              matching the "OCR failed" filter option and ReconciliationSummary
+              — so the count never contradicts the rows the filter shows. */}
+          <span className="text-accent">◐ {(stats?.notFound || 0) + (stats?.failed || 0)} OCR failed</span>
           {(stats?.notFound > 0 || stats?.failed > 0) && (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -737,6 +748,34 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
               <tr>
                 <td colSpan={colOrder.length} className="px-4 py-6 text-center text-muted-foreground text-xs">
                   No missing PODs — every ODR in BAT's Overview pivot has a matching POD in the Delivery POD sheet.
+                </td>
+              </tr>
+            )}
+            {/* General empty-state: a filter (status and/or search) matched
+                nothing on the active tab. Without this the table renders as a
+                bare header with no rows and no explanation — which reads as a
+                broken filter. Say WHY it's empty, and when the operator is on
+                the Paid tab (which by definition holds only found/matched
+                rows) point them at the tabs where failed/pending rows live. */}
+            {filtered.length === 0
+              && !(activeTab === 'missingPods' && missingPodRows.length === 0) && (
+              <tr>
+                <td colSpan={colOrder.length} className="px-4 py-6 text-center text-muted-foreground text-xs">
+                  {(() => {
+                    const tabLabel = (tabs.find((t) => t.id === activeTab) || {}).label || 'this';
+                    const statusLabel = filterStatus === 'not_found'
+                      ? 'OCR-failed'
+                      : filterStatus === 'pending' ? 'pending' : null;
+                    let msg;
+                    if (statusLabel && search) msg = `No ${statusLabel} invoices matching "${search}" on the ${tabLabel} tab.`;
+                    else if (statusLabel) msg = `No ${statusLabel} invoices on the ${tabLabel} tab.`;
+                    else if (search) msg = `No invoices matching "${search}" on the ${tabLabel} tab.`;
+                    else msg = `No invoices on the ${tabLabel} tab.`;
+                    const crossTabHint = statusLabel && activeTab === 'paid'
+                      ? ' Failed, not-found and pending invoices appear on the Non-Compliant and Exceptions tabs, not here.'
+                      : '';
+                    return msg + crossTabHint;
+                  })()}
                 </td>
               </tr>
             )}
