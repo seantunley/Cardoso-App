@@ -222,6 +222,24 @@ function HubPeriods({ data, periodType, onPeriodType }) {
         )}
       </div>
 
+      {/* A branch that has never synced contributes nothing to the totals below.
+          Left unsaid, the report reads as "every branch" while quietly
+          understating the group. Name them. */}
+      {!!data?.missing_branches?.length && (
+        <div
+          className="report-print-hide mb-4 px-4 py-2.5 text-sm"
+          style={{ border: '1px solid hsl(var(--status-critical))', borderRadius: '12px', background: 'hsl(var(--status-critical) / 0.06)' }}
+        >
+          <span className="font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: 'hsl(var(--status-critical))' }}>Incomplete</span>{' '}
+          <span className="text-foreground">
+            {data.missing_branches.join(', ')} {data.missing_branches.length === 1 ? 'has' : 'have'} not reported profit totals.
+          </span>{' '}
+          <span className="text-muted-foreground">
+            Every figure below covers {data.branches_reporting} of {data.branches_expected} branches. Check Hub → Sync Log for that branch&apos;s last sync.
+          </span>
+        </div>
+      )}
+
       {!periods.length ? (
         <div className="rounded-xl border border-border bg-card px-6 py-12 text-center text-sm text-muted-foreground">
           {data?.empty_reason || 'No branch profit totals on the hub yet.'}
@@ -253,7 +271,9 @@ function HubPeriods({ data, periodType, onPeriodType }) {
                       <td className="px-3 py-2 font-display text-base" colSpan={2}>
                         <Chevron open={isOpen} /> {p.period_key}
                         <span className="ml-2 font-mono text-[10px] uppercase tracking-wider text-muted-subtle">
-                          {p.period_start} – {p.period_end} · {p.branches.length} {p.branches.length === 1 ? 'branch' : 'branches'}
+                          {p.period_start} – {p.period_end} · {p.branches.length}
+                          {data?.branches_expected ? ` of ${data.branches_expected}` : ''}
+                          {' '}{p.branches.length === 1 && !data?.branches_expected ? 'branch' : 'branches'}
                         </span>
                       </td>
                       <TotalsCells totals={p} bold />
@@ -328,8 +348,36 @@ export default function InvoiceProfit() {
   const setPeriodType = (v) => { setPeriodTypeState(v); putParam('period', v); };
   // mode: 'all' | 'losses' | 'range'. The range bounds are inclusive and read
   // either as rand of profit or as margin %, per `unit`.
-  const [filter, setFilter] = useState({ mode: 'all', min: '', max: '', unit: 'rand' });
-  const setF = (patch) => setFilter((f) => ({ ...f, ...patch }));
+  //
+  // Held in the URL, like the dates. Saved Views stores nothing but the query
+  // string, so a filter kept only in component state meant saving "the invoices
+  // that lost money in July" and getting back all of July — and a pasted link
+  // carrying ?losses=1 was ignored on arrival.
+  const [filter, setFilter] = useState(() => {
+    const losses = ['1', 'true', 'yes', 'on'].includes(String(searchParams.get('losses') || '').toLowerCase());
+    const min = searchParams.get('min') ?? '';
+    const max = searchParams.get('max') ?? '';
+    const unit = searchParams.get('unit') === 'pct' ? 'pct' : 'rand';
+    const mode = losses ? 'losses' : (min !== '' || max !== '') ? 'range' : 'all';
+    return { mode, min, max, unit };
+  });
+  const setF = (patch) => setFilter((f) => {
+    const next = { ...f, ...patch };
+    setSearchParams((prev) => {
+      const q = new URLSearchParams(prev);
+      // Rewrite the whole filter each time: switching to "all" has to CLEAR the
+      // old bounds, or a stale ?max= would keep filtering invisibly.
+      for (const k of ['losses', 'min', 'max', 'unit']) q.delete(k);
+      if (next.mode === 'losses') q.set('losses', '1');
+      if (next.mode === 'range') {
+        if (next.min !== '') q.set('min', next.min);
+        if (next.max !== '') q.set('max', next.max);
+        q.set('unit', next.unit);
+      }
+      return q;
+    }, { replace: true });
+    return next;
+  });
   // Expansion state keyed by month/week/day id. Everything below a month starts
   // closed — a month of invoices is thousands of rows, and rendering them all up
   // front makes the report unusable. A key absent from the map means "default",
@@ -356,6 +404,15 @@ export default function InvoiceProfit() {
     const cell = (v) => Number(v || 0).toFixed(2);
     const header = ['Level', 'Period / Document', 'Type', 'Customer', 'Invoices', 'Credit notes', 'Selling (ex-VAT)', 'Cost', 'Profit', 'Margin %'];
     const rows = [];
+    // Same reason the PDF and the workbook carry it: a filtered CSV holds only
+    // the matching invoices, and once it is emailed on there is nothing else to
+    // say so.
+    const preamble = activeFilter
+      ? [
+        [`FILTERED: ${activeFilter.label}`, `${activeFilter.matched} of ${activeFilter.of_invoices} invoices`, 'credit notes excluded', '', '', '', '', '', '', ''],
+        ['', '', '', '', '', '', '', '', '', ''],
+      ]
+      : [];
     const totalsRow = (level, label, t) => [level, label, '', '', t.invoice_count, t.credit_note_count, cell(t.selling), cell(t.cost), cell(t.profit), cell(t.margin)];
     for (const m of months) {
       rows.push(totalsRow('Month', m.label, m.totals));
@@ -370,8 +427,9 @@ export default function InvoiceProfit() {
         }
       }
     }
-    if (totals) rows.push(totalsRow('TOTAL', `${from} to ${to}`, totals));
-    downloadCsv(`invoice-profit-${from}-to-${to}.csv`, [header, ...rows]);
+    if (totals) rows.push(totalsRow(activeFilter ? 'TOTAL (filtered)' : 'TOTAL', `${from} to ${to}`, totals));
+    // Preamble ABOVE the header, so the filter is the first thing read.
+    downloadCsv(`invoice-profit-${from}-to-${to}.csv`, [...preamble, header, ...rows]);
   };
 
   const exportPdf = async () => {

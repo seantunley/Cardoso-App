@@ -810,11 +810,28 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     // How far back each period type is worth showing.
     const limits = { day: 60, week: 26, month: 24, year: 5 };
 
-    const sites = prep(`
-      SELECT DISTINCT COALESCE(hs.name, t.site_id) AS site_name
-      FROM hub_invoice_profit_day t LEFT JOIN hub_sites hs ON hs.id = t.site_id
-      WHERE 1 = 1 ${scope.sql}
-      ORDER BY site_name`).all(...scope.params).map((r) => r.site_name).filter(Boolean);
+    // Branch coverage comes from hub_sites, NOT from the profit table. Deriving
+    // it from the data would make a branch that has never synced simply vanish —
+    // no row, no name, no mention — while the report still calls itself "every
+    // branch" and quietly understates consolidated selling, cost and profit. That
+    // is exactly what a staggered rollout looks like: one branch still 404s on
+    // the new endpoint and nothing on screen says so.
+    const siteScope = siteIdFilter(req, res, 'id');
+    const allSites = prep(`
+      SELECT id, COALESCE(name, id) AS site_name
+      FROM hub_sites
+      WHERE 1 = 1 ${siteScope.sql}
+      ORDER BY site_name`).all(...siteScope.params);
+
+    const reporting = new Set(prep(`
+      SELECT DISTINCT t.site_id
+      FROM hub_invoice_profit_day t
+      WHERE 1 = 1 ${scope.sql}`).all(...scope.params).map((r) => r.site_id));
+
+    const sites = allSites.map((r) => r.site_name).filter(Boolean);
+    // Named, not counted — "2 branches missing" sends someone hunting; naming
+    // them says which sync to go and look at.
+    const missingBranches = allSites.filter((r) => !reporting.has(r.id)).map((r) => r.site_name);
 
     const where = siteFilter !== 'all' ? 'AND COALESCE(hs.name, t.site_id) = ?' : '';
     const params = siteFilter !== 'all' ? [siteFilter] : [];
@@ -889,9 +906,19 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
       totals: periods.length ? totals : null,
       filters: { sites, period_types: PERIOD_TYPES },
       last_synced_at: synced[synced.length - 1] || null,
+      // Coverage, stated rather than implied. branches_expected counts the
+      // branches this user may see; missing_branches are the ones contributing
+      // nothing to the figures above.
+      branches_expected: allSites.length,
+      branches_reporting: reporting.size,
+      missing_branches: missingBranches,
       // An empty rollup means the ETL has not run, NOT that nothing was sold -
       // say which, rather than showing a convincing R0.
-      empty_reason: periods.length ? null : 'No branch profit totals have reached the hub yet. They arrive with the site sync - check Hub > Sync Log if this persists.',
+      empty_reason: periods.length
+        ? null
+        : (allSites.length
+          ? `No branch profit totals have reached the hub yet${missingBranches.length ? ` (waiting on ${missingBranches.join(', ')})` : ''}. They arrive with the site sync - check Hub > Sync Log if this persists.`
+          : 'No branches are registered on this hub yet.'),
     };
   };
 

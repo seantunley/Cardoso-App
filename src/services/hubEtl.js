@@ -658,7 +658,12 @@ async function syncSite(site) {
         }
       })();
     } catch (e) {
-      console.warn(`[HUB] Invoice profit day totals sync failed for ${site.slug || site.id}: ${e.message}`);
+      // Through recordStageFailure, not a bare console.warn: the footer decides
+      // status='partial' from stageErrors, so a warn-only catch recorded the run
+      // as 'ok'. The report's own empty state tells operators to check
+      // Hub -> Sync Log when totals are missing — that instruction has to lead
+      // somewhere true.
+      recordStageFailure('Invoice profit totals', e);
     }
 
     // Inventory movement (sales velocity cache) — paginated fetch using
