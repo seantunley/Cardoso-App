@@ -697,3 +697,41 @@ describe('to-date cards honesty (Codex #553)', () => {
     expect(s.week_to_date.complete).toBe(true);
   });
 });
+
+describe('rollUpDays coverage of unfinished periods (Codex #553)', () => {
+  const day = (d, selling, cost) => ({ day: d, selling, cost, invoice_count: 1, credit_note_count: 0 });
+
+  it('caps a period that has not finished and flags it partial', () => {
+    // Data through 27 August: the year, month and week are all still running.
+    const r = rollUpDays([day('2026-08-27', 1000, 900)]);
+    expect(r.year[0].period_end).toBe('2026-12-31');
+    expect(r.year[0].covered_end).toBe('2026-08-27');
+    expect(r.year[0].partial).toBe(true);
+    expect(r.month[0].covered_end).toBe('2026-08-27');
+    expect(r.month[0].partial).toBe(true);
+    expect(r.day[0].partial).toBe(false);   // a day is never unfinished
+  });
+
+  it('treats a finished period as complete', () => {
+    const r = rollUpDays([day('2026-07-15', 1000, 900)], '2026-08-27');
+    expect(r.month[0].period_key).toBe('2026-07');
+    expect(r.month[0].covered_end).toBe('2026-07-31');
+    expect(r.month[0].partial).toBe(false);
+  });
+
+  it('does not call a month partial just because trading started late in it', () => {
+    // Only the END is capped: a month whose first trade is the 3rd is a whole
+    // month, not a partial one.
+    const r = rollUpDays([day('2026-07-03', 1000, 900)], '2026-08-27');
+    expect(r.month[0].partial).toBe(false);
+    expect(r.month[0].period_start).toBe('2026-07-01');
+  });
+
+  it('takes an explicit latest day over the newest row', () => {
+    // A branch that stopped reporting mid-month: its month is covered only to
+    // the last day the hub actually holds.
+    const r = rollUpDays([day('2026-08-10', 1000, 900)], '2026-08-12');
+    expect(r.month[0].covered_end).toBe('2026-08-12');
+    expect(r.month[0].partial).toBe(true);
+  });
+});

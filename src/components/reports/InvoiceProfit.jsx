@@ -241,8 +241,11 @@ function HubPeriods({ data, periodType, onPeriodType, open, setOpen }) {
         >
           <span className="font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: 'var(--phosphor)' }}>Stale</span>{' '}
           <span className="text-foreground">
-            {data.stale_branches.map((b) => `${b.site_name} (${new Date(b.synced_at).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short' })})`).join(', ')}
-            {' '}{data.stale_branches.length === 1 ? 'has' : 'have'} not synced in over a day.
+            {/* Time, not just date: the hub pulls every 5 minutes, so "27 Aug"
+                alone would not tell you whether a branch is minutes or hours
+                behind. */}
+            {data.stale_branches.map((b) => `${b.site_name} (last synced ${new Date(b.synced_at).toLocaleString('en-ZA', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })})`).join(', ')}
+            {' '}{data.stale_branches.length === 1 ? 'has' : 'have'} not synced in over two hours.
           </span>{' '}
           <span className="text-muted-foreground">
             Their figures below are from that last sync, so recent periods understate them. Check Hub → Sync Log.
@@ -300,7 +303,12 @@ function HubPeriods({ data, periodType, onPeriodType, open, setOpen }) {
                       <td className="px-3 py-2 font-display text-base" colSpan={2}>
                         <Chevron open={isOpen} /> {p.period_key}
                         <span className="ml-2 font-mono text-[10px] uppercase tracking-wider text-muted-subtle">
-                          {p.period_start} – {p.period_end} · {p.branches.length}
+                          {p.period_start} – {p.partial ? p.covered_end : p.period_end}
+                          {/* The period is still running (or nothing has synced
+                              since it ended), so this is a to-date figure — not
+                              a finished week, month or year. */}
+                          {p.partial && <span className="ml-1 text-phosphor">to date</span>}
+                          {' '}· {p.branches.length}
                           {data?.branches_expected ? ` of ${data.branches_expected}` : ''}
                           {' '}{p.branches.length === 1 && !data?.branches_expected ? 'branch' : 'branches'}
                         </span>

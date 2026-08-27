@@ -879,17 +879,31 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
           drill_url: site.site_url ? `${site.site_url}/Reports?report=invoice-profit&from=${b.period_start}&to=${b.period_end}` : null,
           selling: b.selling, cost: b.cost, profit: b.profit, margin: b.margin,
           invoice_count: b.invoice_count, credit_note_count: b.credit_note_count,
+          covered_end: b.covered_end,
+          partial: b.partial,
           synced_at: site.synced_at,
         });
         p.selling += b.selling; p.cost += b.cost; p.profit += b.profit;
         p.invoice_count += b.invoice_count; p.credit_note_count += b.credit_note_count;
+        // How far the period is covered across ALL branches — the furthest any
+        // branch has reported. Short of period_end means the period is still
+        // running (or nothing has synced since it ended).
+        if (!p.covered_end || (b.covered_end && b.covered_end > p.covered_end)) p.covered_end = b.covered_end;
       }
     }
 
     const periods = [...byPeriod.values()]
       .sort((a, b) => b.period_key.localeCompare(a.period_key))
       .slice(0, limits[periodType])
-      .map((p) => ({ ...p, margin: margin(p.profit, p.selling), branches: p.branches.sort((a, b) => b.profit - a.profit) }));
+      .map((p) => ({
+        ...p,
+        margin: margin(p.profit, p.selling),
+        // An unfinished period must not advertise its full calendar span: the
+        // current year showing "2026-01-01 - 2026-12-31" reads as a completed
+        // annual total in August.
+        partial: !!p.covered_end && p.covered_end < p.period_end,
+        branches: p.branches.sort((a, b) => b.profit - a.profit),
+      }));
 
     const totals = periods.reduce((acc, p) => {
       acc.selling += p.selling; acc.cost += p.cost; acc.profit += p.profit;
@@ -909,14 +923,25 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     const syncTimes = [...bySite.values()].map((x) => x.synced_at).filter(Boolean).sort();
     const newestSync = syncTimes[syncTimes.length - 1] || null;
     const oldestSync = syncTimes[0] || null;
-    // A branch is stale when it is more than a day behind the freshest branch:
-    // every branch is pulled on the same cycle, so that means it missed one.
-    const STALE_MS = 24 * 60 * 60 * 1000;
-    const staleBranches = newestSync
-      ? [...bySite.values()]
-        .filter((x) => x.synced_at && (Date.parse(newestSync) - Date.parse(x.synced_at)) > STALE_MS)
-        .map((x) => ({ site_name: x.site_name, synced_at: x.synced_at }))
-      : [];
+    // Staleness is measured against NOW, not against the freshest branch.
+    //
+    // Comparing branches to each other only ever catches ONE branch falling
+    // behind. If the hub loses every branch at once — network down, the site
+    // endpoint broken by a release, or simply a single-branch hub — every
+    // timestamp ages together, every difference stays zero, and the warning
+    // never fires while the totals quietly rot. Absolute is the honest measure;
+    // it also subsumes the relative case, since a lone laggard is stale by the
+    // clock too.
+    //
+    // The hub ETL runs every 5 MINUTES (scheduler: hub-sync, intervalMs 5*60e3),
+    // so two hours is roughly two dozen missed cycles — loose enough to ride out
+    // a restart or a transient failure, tight enough that a real outage shows up
+    // the same morning rather than the next day.
+    const STALE_MS = 2 * 60 * 60 * 1000;
+    const nowMs = Date.now();
+    const staleBranches = [...bySite.values()]
+      .filter((x) => x.synced_at && (nowMs - Date.parse(x.synced_at)) > STALE_MS)
+      .map((x) => ({ site_name: x.site_name, synced_at: x.synced_at }));
     return {
       hub_mode: true,
       period_type: periodType,

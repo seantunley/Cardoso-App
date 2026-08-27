@@ -657,9 +657,16 @@ export async function fetchProfitDayTotals({ pool, from, to }) {
  * keeps one key. YEARS are CALENDAR years: "2026" must mean the trading year the
  * accounts are cut on, not ISO-2026, which can begin in December.
  *
+ * A period whose calendar end is past the last day of data is flagged `partial`
+ * and reports `covered_end` as that last day. Without it the CURRENT week, month
+ * and year each advertise their full calendar span — an August year bucket
+ * showing "2026-01-01 to 2026-12-31" reads as a finished annual total rather
+ * than year-to-date.
+ *
  * @param {Array<{ day: string, selling: number, cost: number, invoice_count?: number, credit_note_count?: number }>} days
+ * @param {string} [latestDay] Last day of data. Defaults to the newest row.
  */
-export function rollUpDays(days) {
+export function rollUpDays(days, latestDay) {
   const buckets = { day: new Map(), week: new Map(), month: new Map(), year: new Map() };
 
   const bump = (type, key, start, end, row) => {
@@ -688,10 +695,19 @@ export function rollUpDays(days) {
     bump('year', year, `${year}-01-01`, `${year}-12-31`, row);
   }
 
+  // Only the END is capped. Clipping the start from the data would misread a
+  // month whose first trading day is the 3rd as partial, when it is simply a
+  // month that began on a weekend.
+  const lastDay = latestDay
+    || (days || []).reduce((max, r) => (r?.day && r.day > max ? r.day : max), '');
+
   const out = {};
   for (const type of PERIOD_TYPES) {
     out[type] = [...buckets[type].values()]
-      .map(sealTotals)
+      .map((b) => {
+        const coveredEnd = lastDay && lastDay < b.period_end ? lastDay : b.period_end;
+        return sealTotals({ ...b, covered_end: coveredEnd, partial: coveredEnd < b.period_end });
+      })
       .sort((a, b) => a.period_key.localeCompare(b.period_key));
   }
   return out;
