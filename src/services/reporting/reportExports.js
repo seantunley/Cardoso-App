@@ -515,3 +515,103 @@ export async function buildSalesByVendorXlsx(report) {
   sbvStyle(totals, 1);
   return await wb.xlsx.writeBuffer();
 }
+
+// ── Invoice Profit ───────────────────────────────────────────────────────────
+// Three sheets, all built from the same report object the screen renders:
+//   Summary  — the day/week/month rollup, indented the way the report nests
+//   Invoices — every document, one row each (the sheet people pivot on)
+//   Notes    — what the numbers mean and what was excluded, so a workbook that
+//              gets emailed on can still explain itself
+const PROFIT_MONEY = '#,##0.00';
+const PROFIT_PCT = '0.00"%"';
+
+// Bold header + frozen top row + sane widths, applied per sheet.
+function profitStyle(ws, headerRow, widths) {
+  ws.getRow(headerRow).font = { bold: true };
+  ws.views = [{ state: 'frozen', ySplit: headerRow }];
+  widths.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+}
+
+export async function buildInvoiceProfitXlsx(report) {
+  const wb = new ExcelJS.Workbook();
+  const t = (x) => (x || { selling: 0, cost: 0, profit: 0, margin: 0, invoice_count: 0, credit_note_count: 0 });
+
+  // ── Summary: Month → Week → Day, indented in the Level column ──────────────
+  const s = wb.addWorksheet('Summary');
+  s.addRow(['Invoice Profit']);
+  s.addRow([report?.site_name || '', `${report?.from || ''} to ${report?.to || ''}`, `generated ${dateOnly()}`]);
+  s.addRow([]);
+  const sHeader = s.rowCount + 1;
+  s.addRow(['Level', 'Period', 'Invoices', 'Credit notes', 'Selling (ex-VAT)', 'Cost', 'Profit', 'Margin %']);
+
+  const addTotalsRow = (level, label, totals) => {
+    const v = t(totals);
+    return s.addRow([level, label, v.invoice_count, v.credit_note_count, num2(v.selling), num2(v.cost), num2(v.profit), num2(v.margin)]);
+  };
+
+  for (const m of report?.months || []) {
+    addTotalsRow('Month', m.label, m.totals).font = { bold: true };
+    for (const w of m.weeks || []) {
+      const label = `    ${w.label}${w.partial ? ' (part)' : ''} · ${w.week_start} – ${w.week_end}`;
+      addTotalsRow('Week', label, w.totals);
+      for (const d of w.days || []) addTotalsRow('Day', `        ${d.day}`, d.totals);
+    }
+  }
+  s.addRow([]);
+  addTotalsRow('TOTAL', `${report?.from || ''} to ${report?.to || ''}`, report?.totals).font = { bold: true };
+  profitStyle(s, sHeader, [10, 42, 10, 13, 18, 16, 16, 10]);
+  for (const c of [5, 6, 7]) s.getColumn(c).numFmt = PROFIT_MONEY;
+  s.getColumn(8).numFmt = PROFIT_PCT;
+
+  // ── Invoices: one row per document ─────────────────────────────────────────
+  const d = wb.addWorksheet('Invoices');
+  d.addRow(['Date', 'Week', 'Type', 'Document', 'Customer code', 'Customer', 'Rep', 'Selling (ex-VAT)', 'Cost', 'Profit', 'Margin %']);
+  for (const m of report?.months || []) {
+    for (const w of m.weeks || []) {
+      for (const day of w.days || []) {
+        for (const doc of day.documents || []) {
+          d.addRow([
+            doc.date,
+            `W${w.iso_week}`,
+            doc.doc_type === 'credit_note' ? 'Credit note' : 'Invoice',
+            doc.doc_number,
+            doc.customer_code,
+            doc.customer_name,
+            doc.sales_rep || '',
+            num2(doc.selling), num2(doc.cost), num2(doc.profit), num2(doc.margin),
+          ]);
+        }
+      }
+    }
+  }
+  profitStyle(d, 1, [12, 8, 12, 16, 16, 38, 8, 18, 16, 16, 10]);
+  for (const c of [8, 9, 10]) d.getColumn(c).numFmt = PROFIT_MONEY;
+  d.getColumn(11).numFmt = PROFIT_PCT;
+  d.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: 11 } };
+
+  // ── Notes: the rules behind the numbers ────────────────────────────────────
+  const n = wb.addWorksheet('Notes');
+  const ex = report?.excluded || {};
+  [
+    ['Invoice Profit — how these numbers are built'],
+    [],
+    ['Selling', 'Sage document net excluding VAT (OEINVH.INVNETNOTX / OECRDH.CRDNETNOTX).'],
+    ['Cost', 'The cost Sage costed onto the document when it was raised (OEINVD.EXTICOST / OECRDD.EXTCCOST) — not the item master\'s current cost, so this report does not restate itself over time.'],
+    ['Profit', 'Selling less Cost. Margin % is Profit as a percentage of Selling.'],
+    ['Credit notes', 'Carried as negative selling and negative cost, so every total is a net figure.'],
+    ['Weeks', 'ISO 8601 weeks (Monday start). A week crossing a month boundary is shown under both months, marked "(part)", holding only that month\'s days — so each level sums exactly to the level above it.'],
+    [],
+    ['Excluded from every figure above'],
+    ['Inter-branch transfers', ex.reason || 'Internal stock movements between depots, not sales.'],
+    ['Documents excluded', ex.count || 0],
+    ['Selling excluded', num2(ex.selling)],
+    ['Cost excluded', num2(ex.cost)],
+  ].forEach((r) => n.addRow(r));
+  n.getRow(1).font = { bold: true };
+  n.getRow(9).font = { bold: true };
+  n.getColumn(1).width = 22;
+  n.getColumn(2).width = 110;
+  n.getColumn(2).alignment = { wrapText: true, vertical: 'top' };
+
+  return await wb.xlsx.writeBuffer();
+}

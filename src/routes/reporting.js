@@ -25,6 +25,7 @@ import { expandDataRecord, getFirstNonEmptyObjectValue, parseJsonSafely, SALES_R
 import { analyseInvoiceCredit } from '../lib/creditAnalysis.js';
 import { getCreditLogicForAnalysis } from '../services/creditLogic.js';
 import { ageOpenItems, BUCKET_KEYS, AP_SCHEME } from '../services/aging.js';
+import { buildProfitReport } from '../services/reporting/profitReport.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -742,6 +743,85 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     } catch (err) {
       console.error('[daily-sales-documents] failed', err.message);
       res.status(503).json({ error: 'Could not load the documents for this day. Check the Sage connection and try again.' });
+    }
+  });
+
+  // ── Invoice Profit ─────────────────────────────────────────────────────────
+  // Per-invoice selling, cost and profit, nested Month → ISO Week → Day →
+  // invoice. Cost is the cost Sage costed onto the document (OEINVD.EXTICOST /
+  // OECRDD.EXTCCOST), so the report is historical and never restates itself when
+  // an item's cost changes. See src/services/reporting/profitReport.js for the
+  // full source/sign/exclusion rules.
+  //
+  // Gated by monthlyReportsGuard — the same permission that guards Daily Sales
+  // Figures and the AR document summary. This report exposes COST and MARGIN on
+  // top of those figures, so it must never sit behind the weaker reports gate.
+  const parseProfitRange = (query) => {
+    const pad = (n) => String(n).padStart(2, '0');
+    const iso = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const valid = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
+    const now = new Date();
+    return {
+      from: valid(query.from) ? query.from : iso(new Date(now.getFullYear(), now.getMonth(), 1)),
+      to: valid(query.to) ? query.to : iso(now),
+    };
+  };
+
+  // Shared by the JSON route and the Excel export so the workbook can never
+  // drift from what's on screen.
+  const loadProfitReport = async (query) => {
+    const { from, to } = parseProfitRange(query);
+    const pool = await getSagePool();
+    const report = await buildProfitReport({ pool, from, to });
+    const depotRow = prep('SELECT name FROM depot_profile WHERE id = 1').get();
+    return { ...report, site_name: (depotRow?.name || '').trim() || SITE_NAME };
+  };
+
+  router.get('/api/reports/invoice-profit', ...monthlyReportsGuard, async (req, res) => {
+    const { from, to } = parseProfitRange(req.query);
+    try {
+      if (process.env.HUB_MODE === 'true') {
+        // The hub holds monthly AR totals, not per-invoice cost — there is no
+        // honest way to compute per-invoice profit here yet. Say so explicitly
+        // rather than returning empty months that would read as "no sales".
+        return res.json({
+          hub_mode: true,
+          unavailable: true,
+          from,
+          to,
+          months: [],
+          totals: null,
+          message: 'Invoice profit runs live against each branch\'s Sage and is not available on the hub yet. Open this report on a branch (site) install.',
+        });
+      }
+      return res.json(await loadProfitReport(req.query));
+    } catch (err) {
+      console.error(`[invoice-profit] failed to build the profit report for ${from} → ${to}:`, err.message);
+      try { logError('reporting.invoice-profit', err, { from, to }); } catch { /* logError is best-effort; the 503 below is what the operator sees */ }
+      return res.status(503).json({
+        error: `Could not build the Invoice Profit report for ${from} to ${to}. The report reads invoice cost live from Sage (OEINVH/OEINVD) — check that the Sage connection is up in Settings → Connections, then try again. Cause: ${err.message}`,
+      });
+    }
+  });
+
+  router.get('/api/reports/invoice-profit/export', ...monthlyReportsGuard, async (req, res) => {
+    const { from, to } = parseProfitRange(req.query);
+    try {
+      if (process.env.HUB_MODE === 'true') {
+        return res.status(409).json({ error: 'Invoice profit is not available on the hub yet — export it from a branch (site) install.' });
+      }
+      const report = await loadProfitReport(req.query);
+      const { buildInvoiceProfitXlsx } = await import('../services/reporting/reportExports.js');
+      const buf = await buildInvoiceProfitXlsx(report);
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="invoice-profit-${from}-to-${to}.xlsx"`);
+      return res.send(buf);
+    } catch (err) {
+      console.error(`[invoice-profit] failed to export the profit workbook for ${from} → ${to}:`, err.message);
+      try { logError('reporting.invoice-profit.export', err, { from, to }); } catch { /* best-effort */ }
+      return res.status(500).json({
+        error: `Could not export the Invoice Profit workbook for ${from} to ${to}. Cause: ${err.message}`,
+      });
     }
   });
 

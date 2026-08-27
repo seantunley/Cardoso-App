@@ -1,7 +1,7 @@
 import { lazy, Suspense, Fragment, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Wallet, Users, BarChart3, PieChart, AlertTriangle, Boxes, Receipt, CalendarDays, FileWarning, Truck } from 'lucide-react';
+import { Wallet, Users, BarChart3, PieChart, AlertTriangle, Boxes, Receipt, CalendarDays, FileWarning, Truck, TrendingUp } from 'lucide-react';
 import { api } from '@/api/apiClient';
 import { hasPermission } from '@/lib/permissions';
 import SavedViews from '@/components/reports/SavedViews';
@@ -19,6 +19,7 @@ const BatExceptionsWeekly = lazy(() => import('@/components/reports/BatException
 const InventoryValue   = lazy(() => import('@/components/reports/InventoryValue'));
 const DailySalesFigures = lazy(() => import('@/components/reports/DailySalesFigures'));
 const SalesByVendor    = lazy(() => import('@/components/reports/SalesByVendor'));
+const InvoiceProfit    = lazy(() => import('@/components/reports/InvoiceProfit'));
 
 const REPORTS = [
   {
@@ -52,6 +53,7 @@ const REPORTS = [
     accent: 'hsl(var(--status-ok))',
     items: [
       { id: 'sales-by-vendor', name: 'Sales by Vendor', icon: Truck, accent: 'hsl(var(--status-ok))', component: SalesByVendor, ready: true },
+      { id: 'invoice-profit',  name: 'Invoice Profit',  icon: TrendingUp, accent: 'hsl(33 95% 55%)', component: InvoiceProfit, ready: true },
     ],
   },
   {
@@ -63,15 +65,24 @@ const REPORTS = [
   },
 ];
 
+// Reports whose API sits behind can_access_monthly_reports. Module scope so the
+// useMemo below has a stable reference.
+const MONTHLY_ONLY = ['daily-sales', 'invoice-profit'];
+
 export default function Reports() {
   const { data: currentUser } = useQuery({ queryKey: ["currentUser"], queryFn: () => api.auth.me(), staleTime: Infinity });
   // Daily Sales Figures exposes the same posted-document figures as Monthly Sales
   // Figures, so it sits behind can_access_monthly_reports. Hide it (and block a
   // direct ?report=daily-sales) for Reports-only users, matching the API guard.
+  //
+  // Invoice Profit shows those same figures PLUS cost and margin, and its API is
+  // gated by the same monthlyReportsGuard — so it hides on exactly the same
+  // permission. Keep this list and the route guards in step: a report visible
+  // here but blocked by the API just renders an error for the user.
   const canMonthly = hasPermission(currentUser, 'can_access_monthly_reports');
   const groups = useMemo(
     () => REPORTS
-      .map((g) => ({ ...g, items: g.items.filter((it) => it.id !== 'daily-sales' || canMonthly) }))
+      .map((g) => ({ ...g, items: g.items.filter((it) => !MONTHLY_ONLY.includes(it.id) || canMonthly) }))
       .filter((g) => g.items.length > 0),
     [canMonthly],
   );

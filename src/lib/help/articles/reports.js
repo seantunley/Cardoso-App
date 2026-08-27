@@ -112,6 +112,73 @@ export const reportsArticles = [
     ],
   },
   {
+    slug: "invoice-profit",
+    title: "Invoice Profit",
+    summary: "Selling, cost and profit on every invoice, rolled up by day, week and month.",
+    category: "reports",
+    audience: "managers",
+    keywords: ["profit", "margin", "cost", "gross profit", "invoice profit", "selling", "markup", "gp", "daily profit", "weekly profit", "monthly profit"],
+    body: [
+      {
+        type: "p",
+        text: "**Reports → Sales → Invoice Profit** shows what each invoice actually made. Every document carries its selling value, its cost and the profit between them, and those add up through three levels — day, week and month.",
+      },
+      { type: "h", text: "Reading the report" },
+      {
+        type: "p",
+        text: "The four cards across the top are the to-date figures: the latest trading day, the week and month that day falls in, and the total for the whole range you've selected.",
+      },
+      {
+        type: "steps",
+        items: [
+          "Set the **From** and **To** dates. It opens on the current month to date.",
+          "Click a **month** row to open its weeks.",
+          "Click a **week** row to open its days.",
+          "Click a **day** row to see every invoice and credit note raised that day.",
+        ],
+      },
+      {
+        type: "table",
+        headers: ["Column", "What it is"],
+        rows: [
+          ["Selling", "The invoice total excluding VAT — the same figure the Daily Sales Figures report shows."],
+          ["Cost", "What the stock on that invoice cost, as Sage costed it onto the document when it was raised."],
+          ["Profit", "Selling less Cost. Red when negative."],
+          ["Margin", "Profit as a percentage of Selling."],
+          ["Inv / CN", "How many invoices and credit notes are in that day, week or month."],
+        ],
+      },
+      { type: "h", text: "What the numbers include" },
+      {
+        type: "list",
+        items: [
+          "**Credit notes are netted off** — they appear as their own rows with negative selling, cost and profit, so every subtotal is a net figure.",
+          "**Inter-branch transfers are excluded** — stock moved between depots is an internal movement at cost, not a sale, and the same stock is invoiced again when the receiving branch sells it. The line at the foot of the report says how much was left out.",
+          "**Amounts are ex-VAT**, in Rand.",
+        ],
+      },
+      {
+        type: "callout",
+        tone: "info",
+        text: "Cost is the cost Sage recorded on the invoice at the time — not the item's current cost. That means a month you printed last year prints the same figures today; the report never restates itself when a cost changes.",
+      },
+      {
+        type: "callout",
+        tone: "tip",
+        text: "**Excel** gives you three sheets: the day/week/month rollup, one row per invoice (filter-ready, for pivoting), and a Notes sheet explaining the rules — so a workbook you email on still explains itself.",
+      },
+      {
+        type: "p",
+        text: "A week that starts in one month and ends in the next is shown under **both** months, marked **part**, holding only that month's days. That way each level is exactly the sum of the level below it and a month total is never inflated by days outside it.",
+      },
+      {
+        type: "callout",
+        tone: "warning",
+        text: "This report shows cost and margin, so it sits behind the same monthly-reports permission as Daily Sales Figures. It reads live from the branch's Sage — it isn't available on the hub yet.",
+      },
+    ],
+  },
+  {
     slug: "trends",
     title: "Trends over time",
     summary: "Customer volume and flag rate, and inventory velocity, revenue, and seasonality.",
