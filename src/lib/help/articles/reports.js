@@ -135,6 +135,7 @@ export const reportsArticles = [
           "Click a **month** row to open its weeks.",
           "Click a **week** row to open its days.",
           "Click a **day** row to see every invoice and credit note raised that day.",
+          "Click an **invoice** to see the stock lines behind it — item, quantity, unit price, and the selling, cost, profit and margin of each line.",
         ],
       },
       {
@@ -182,7 +183,7 @@ export const reportsArticles = [
       {
         type: "callout",
         tone: "tip",
-        text: "**Excel** gives you three sheets: the day/week/month rollup, one row per invoice (filter-ready, for pivoting), and a Notes sheet explaining the rules — so a workbook you email on still explains itself.",
+        text: "**PDF** gives you the day/week/month rollup on a landscape sheet (the per-invoice detail lives in Excel, which is the right tool for 2,000 rows). **Excel** gives you three sheets: the day/week/month rollup, one row per invoice (filter-ready, for pivoting), and a Notes sheet explaining the rules — so a workbook you email on still explains itself.",
       },
       {
         type: "p",

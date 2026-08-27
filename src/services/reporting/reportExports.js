@@ -615,3 +615,89 @@ export async function buildInvoiceProfitXlsx(report) {
 
   return await wb.xlsx.writeBuffer();
 }
+
+// ── Invoice Profit — PDF ─────────────────────────────────────────────────────
+// The rollup, not the invoice list: a month is ~2,500 documents and nobody wants
+// that as a PDF. Month rows are bold, weeks indented beneath them, days beneath
+// those — the same shape as the screen. The per-invoice detail lives in the
+// Excel export, which is the right tool for it.
+const profitSigned = (n) => {
+  const v = Number(n) || 0;
+  const abs = Math.abs(v).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return v < 0 ? `-${abs}` : abs;
+};
+const profitPct = (n) => `${(Number(n) || 0).toFixed(2)}%`;
+
+export function buildInvoiceProfitPdf(report) {
+  const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape' });
+  const t = report?.totals || {};
+
+  doc.setFontSize(14);
+  doc.setTextColor(0);
+  doc.text('Invoice Profit', 14, 14);
+  doc.setFontSize(9);
+  doc.setTextColor(110);
+  doc.text(`${report?.site_name || ''} · ${report?.from || ''} to ${report?.to || ''} · generated ${dateOnly()}`, 14, 20);
+  doc.text(
+    `Selling ${fmtR(t.selling)} · Cost ${fmtR(t.cost)} · Profit ${profitSigned(t.profit)} · Margin ${profitPct(t.margin)}  (ex-VAT, credit notes netted off)`,
+    14, 25,
+  );
+
+  let y = 31;
+  // An active filter changes what every number below means, so it has to travel
+  // with the document — a PDF gets emailed on with no other context.
+  if (report?.filter?.active) {
+    doc.setTextColor(180, 95, 10);
+    doc.text(
+      `Filtered: ${report.filter.label} — ${report.filter.matched} of ${report.filter.of_invoices} invoices. Credit notes excluded.`,
+      14, y,
+    );
+    doc.setTextColor(110);
+    y += 6;
+  }
+
+  const body = [];
+  for (const m of report?.months || []) {
+    body.push({ level: 'month', cells: [m.label, String(m.totals.invoice_count), fmtR(m.totals.selling), fmtR(m.totals.cost), profitSigned(m.totals.profit), profitPct(m.totals.margin)] });
+    for (const w of m.weeks || []) {
+      const label = `   ${w.label}${w.partial ? ' (part)' : ''}  ${w.week_start} – ${w.week_end}`;
+      body.push({ level: 'week', cells: [label, String(w.totals.invoice_count), fmtR(w.totals.selling), fmtR(w.totals.cost), profitSigned(w.totals.profit), profitPct(w.totals.margin)] });
+      for (const d of w.days || []) {
+        body.push({ level: 'day', cells: [`      ${d.day}`, String(d.totals.invoice_count), fmtR(d.totals.selling), fmtR(d.totals.cost), profitSigned(d.totals.profit), profitPct(d.totals.margin)] });
+      }
+    }
+  }
+
+  autoTable(doc, {
+    startY: y,
+    styles: { fontSize: 7.5, cellPadding: 1.3 },
+    headStyles: { fillColor: [33, 33, 33] },
+    head: [['Period', 'Invoices', 'Selling (ex-VAT)', 'Cost', 'Profit', 'Margin']],
+    body: body.map((r) => r.cells),
+    foot: [[`TOTAL · ${report?.from || ''} to ${report?.to || ''}`, String(t.invoice_count || 0), fmtR(t.selling), fmtR(t.cost), profitSigned(t.profit), profitPct(t.margin)]],
+    footStyles: { fillColor: [220, 220, 220], textColor: 0, fontStyle: 'bold' },
+    columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' } },
+    // Month rows carry the eye down a multi-page table; without the weight every
+    // row looks the same and the hierarchy is lost on paper.
+    didParseCell: (data) => {
+      if (data.section !== 'body') return;
+      const row = body[data.row.index];
+      if (row?.level === 'month') {
+        data.cell.styles.fontStyle = 'bold';
+        data.cell.styles.fillColor = [242, 242, 242];
+      }
+    },
+  });
+
+  const ex = report?.excluded;
+  if (ex?.count) {
+    doc.setFontSize(7.5);
+    doc.setTextColor(120);
+    doc.text(
+      `Excluded ${ex.count} inter-branch transfer document(s) worth ${fmtR(ex.selling)} selling / ${fmtR(ex.cost)} cost. ${ex.reason || ''}`,
+      14, Math.min(doc.lastAutoTable.finalY + 6, 200),
+    );
+  }
+
+  return Buffer.from(doc.output('arraybuffer'));
+}

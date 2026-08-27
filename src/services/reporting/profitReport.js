@@ -82,6 +82,7 @@ export const marginPct = (profit, selling) => (selling ? (profit / selling) * 10
 const INVOICE_SQL = `
   SELECT
     'invoice' AS doc_type,
+    CAST(h.INVUNIQ AS varchar(32)) AS doc_uniq,
     LTRIM(RTRIM(h.INVNUMBER))     AS doc_number,
     h.INVDATE                     AS ymd,
     LTRIM(RTRIM(h.CUSTOMER))      AS customer_code,
@@ -104,6 +105,7 @@ const INVOICE_SQL = `
 
   SELECT
     'credit_note',
+    CAST(k.CRDUNIQ AS varchar(32)),
     LTRIM(RTRIM(k.CRDNUMBER)),
     k.CRDDATE,
     LTRIM(RTRIM(k.CUSTOMER)),
@@ -156,6 +158,7 @@ export async function fetchProfitDocuments({ pool, from, to }) {
     const profit = selling - cost;
     documents.push({
       doc_type: r.doc_type,
+      doc_uniq: r.doc_uniq,
       doc_number: r.doc_number || '',
       date: fromSageDate(r.ymd),
       customer_code: r.customer_code || '',
@@ -170,6 +173,118 @@ export async function fetchProfitDocuments({ pool, from, to }) {
   }
 
   return { documents, excluded };
+}
+
+/**
+ * The lines behind ONE document — the drill-down under an invoice row.
+ *
+ * Line selling is qty x unit price LESS the line discount, which is how Sage
+ * arrives at the header net. Verified over all 2,498 July 2026 documents:
+ * 2,495 tie to the header exactly; 3 differ (R287 in total) because they carry a
+ * document-level charge or discount that belongs to no single line. Those are
+ * NOT hidden — `adjustment` carries the difference so the drill-down always adds
+ * up to the invoice row above it. A detail view that doesn't reconcile to its
+ * own header is worse than no detail view.
+ *
+ *   Invoices     OEINVD  QTYSHIPPED x UNITPRICE - INVDISC  /  EXTICOST
+ *   Credit notes OECRDD  QTYRETURN  x UNITPRICE - CRDDISC  /  EXTCCOST  (negated)
+ *
+ * @param {{ pool: import('mssql').ConnectionPool, type: 'invoice'|'credit_note', uniq: string }} args
+ */
+export async function fetchDocumentLines({ pool, type, uniq }) {
+  if (type !== 'invoice' && type !== 'credit_note') {
+    throw new Error(`Invoice Profit detail: unknown document type ${JSON.stringify(type)} — expected 'invoice' or 'credit_note'.`);
+  }
+  if (!/^\d{1,32}$/.test(String(uniq || ''))) {
+    throw new Error(`Invoice Profit detail: document id must be numeric, received ${JSON.stringify(uniq)}.`);
+  }
+
+  const isInvoice = type === 'invoice';
+  // Credit notes are negated to match the sign convention used everywhere else
+  // in this report, so a drill-down's numbers agree with the row that opened it.
+  const linesSql = isInvoice
+    ? `SELECT d.LINENUM AS line_no, LTRIM(RTRIM(d.ITEM)) AS item, LTRIM(RTRIM(d."DESC")) AS description,
+              d.QTYSHIPPED AS qty, LTRIM(RTRIM(d.INVUNIT)) AS uom, d.UNITPRICE AS unit_price,
+              d.INVDISC AS discount,
+              (d.QTYSHIPPED * d.UNITPRICE) - d.INVDISC AS selling,
+              d.EXTICOST AS cost
+       FROM OEINVD d WHERE d.INVUNIQ = @uniq ORDER BY d.LINENUM`
+    : `SELECT d.LINENUM AS line_no, LTRIM(RTRIM(d.ITEM)) AS item, LTRIM(RTRIM(d."DESC")) AS description,
+              -d.QTYRETURN AS qty, '' AS uom, d.UNITPRICE AS unit_price,
+              -d.CRDDISC AS discount,
+              -((d.QTYRETURN * d.UNITPRICE) - d.CRDDISC) AS selling,
+              -d.EXTCCOST AS cost
+       FROM OECRDD d WHERE d.CRDUNIQ = @uniq ORDER BY d.LINENUM`;
+
+  const headerSql = isInvoice
+    ? `SELECT LTRIM(RTRIM(h.INVNUMBER)) AS doc_number, h.INVDATE AS ymd,
+              LTRIM(RTRIM(h.CUSTOMER)) AS customer_code, LTRIM(RTRIM(cu.NAMECUST)) AS customer_name,
+              h.INVNETNOTX AS selling
+       FROM OEINVH h LEFT JOIN ARCUS cu ON LTRIM(RTRIM(cu.IDCUST)) = LTRIM(RTRIM(h.CUSTOMER))
+       WHERE h.INVUNIQ = @uniq`
+    : `SELECT LTRIM(RTRIM(k.CRDNUMBER)) AS doc_number, k.CRDDATE AS ymd,
+              LTRIM(RTRIM(k.CUSTOMER)) AS customer_code, LTRIM(RTRIM(cu.NAMECUST)) AS customer_name,
+              -k.CRDNETNOTX AS selling
+       FROM OECRDH k LEFT JOIN ARCUS cu ON LTRIM(RTRIM(cu.IDCUST)) = LTRIM(RTRIM(k.CUSTOMER))
+       WHERE k.CRDUNIQ = @uniq`;
+
+  const req = () => pool.request().input('uniq', sql.VarChar(32), String(uniq));
+  const [headerRs, linesRs] = await Promise.all([req().query(headerSql), req().query(linesSql)]);
+
+  const header = headerRs.recordset[0];
+  if (!header) {
+    throw new Error(`Invoice Profit detail: no ${isInvoice ? 'invoice' : 'credit note'} found in Sage with id ${uniq}. It may have been deleted since the report was built — reload the report.`);
+  }
+
+  const lines = linesRs.recordset.map((r) => {
+    const selling = num(r.selling);
+    const cost = num(r.cost);
+    const profit = selling - cost;
+    return {
+      line_no: num(r.line_no),
+      item: r.item || '',
+      description: r.description || '',
+      qty: num(r.qty),
+      uom: (r.uom || '').trim(),
+      unit_price: num(r.unit_price),
+      discount: num(r.discount),
+      selling,
+      cost,
+      profit,
+      margin: marginPct(profit, selling),
+    };
+  });
+
+  const lineSelling = lines.reduce((a, l) => a + l.selling, 0);
+  const headerSelling = num(header.selling);
+  const diff = headerSelling - lineSelling;
+
+  return {
+    doc_type: type,
+    doc_uniq: String(uniq),
+    doc_number: header.doc_number || '',
+    date: fromSageDate(header.ymd),
+    customer_code: header.customer_code || '',
+    customer_name: header.customer_name || '',
+    lines,
+    // Non-null only when the lines don't account for the whole document — a
+    // header-level charge or discount. Shown as its own row so the detail always
+    // reconciles to the invoice row it opened from.
+    adjustment: Math.abs(diff) > 0.02 ? diff : null,
+    // Totals come from the HEADER selling and the summed line cost — the same
+    // two numbers the report's own invoice row uses, so the drill-down can never
+    // disagree with the row that opened it.
+    totals: (() => {
+      const cost = lines.reduce((a, l) => a + l.cost, 0);
+      return {
+        selling: headerSelling,
+        cost,
+        profit: headerSelling - cost,
+        margin: marginPct(headerSelling - cost, headerSelling),
+        line_count: lines.length,
+      };
+    })(),
+  };
 }
 
 // Running accumulator shared by every level of the tree.

@@ -25,7 +25,7 @@ import { expandDataRecord, getFirstNonEmptyObjectValue, parseJsonSafely, SALES_R
 import { analyseInvoiceCredit } from '../lib/creditAnalysis.js';
 import { getCreditLogicForAnalysis } from '../services/creditLogic.js';
 import { ageOpenItems, BUCKET_KEYS, AP_SCHEME } from '../services/aging.js';
-import { buildProfitReport } from '../services/reporting/profitReport.js';
+import { buildProfitReport, fetchDocumentLines } from '../services/reporting/profitReport.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -819,6 +819,50 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
       return res.status(503).json({
         error: `Could not build the Invoice Profit report for ${from} to ${to}. The report reads invoice cost live from Sage (OEINVH/OEINVD) — check that the Sage connection is up in Settings → Connections, then try again. Cause: ${err.message}`,
       });
+    }
+  });
+
+  // GET /api/reports/invoice-profit/document?type=invoice|credit_note&uniq=<id>
+  // The stock lines behind one document — the drill-down under an invoice row.
+  // Fetched on demand rather than shipped with the report: a month is ~2,500
+  // documents and tens of thousands of lines, and almost none of them get opened.
+  router.get('/api/reports/invoice-profit/document', ...monthlyReportsGuard, async (req, res) => {
+    const type = String(req.query.type || 'invoice');
+    const uniq = String(req.query.uniq || '');
+    try {
+      if (process.env.HUB_MODE === 'true') {
+        return res.status(409).json({ error: 'Invoice detail is not available on the hub — open the report on a branch (site) install.' });
+      }
+      const pool = await getSagePool();
+      return res.json(await fetchDocumentLines({ pool, type, uniq }));
+    } catch (err) {
+      console.error(`[invoice-profit] failed to load the lines for ${type} ${uniq}:`, err.message);
+      try { logError('reporting.invoice-profit.document', err, { type, uniq }); } catch { /* best-effort */ }
+      return res.status(503).json({
+        error: `Could not load the lines for this document. The detail is read live from Sage (OEINVD/OECRDD) — check the Sage connection in Settings → Connections and try again. Cause: ${err.message}`,
+      });
+    }
+  });
+
+  // GET /api/reports/invoice-profit/export.pdf — server-built PDF, matching the
+  // Aged Debtors / Rep Exposure exports. Same report object as the screen and
+  // the Excel workbook, so all three always agree.
+  router.get('/api/reports/invoice-profit/export.pdf', ...monthlyReportsGuard, async (req, res) => {
+    const { from, to } = parseProfitRange(req.query);
+    try {
+      if (process.env.HUB_MODE === 'true') {
+        return res.status(409).json({ error: 'Invoice profit is not available on the hub yet — export it from a branch (site) install.' });
+      }
+      const report = await loadProfitReport(req.query);
+      const { buildInvoiceProfitPdf } = await import('../services/reporting/reportExports.js');
+      const buf = buildInvoiceProfitPdf(report);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="invoice-profit-${from}-to-${to}.pdf"`);
+      return res.send(buf);
+    } catch (err) {
+      console.error(`[invoice-profit] failed to export the profit PDF for ${from} → ${to}:`, err.message);
+      try { logError('reporting.invoice-profit.pdf', err, { from, to }); } catch { /* best-effort */ }
+      return res.status(500).json({ error: `Could not export the Invoice Profit PDF for ${from} to ${to}. Cause: ${err.message}` });
     }
   });
 

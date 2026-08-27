@@ -16,6 +16,7 @@ import {
   rangeStats,
   filterDocuments,
   describeFilter,
+  fetchDocumentLines,
   isInterBranchName,
   marginPct,
   toSageDate,
@@ -333,5 +334,78 @@ describe('describeFilter', () => {
     expect(describeFilter({ max: 5, unit: 'pct' })).toBe('Invoices that made 5% or less');
     expect(describeFilter({ min: 100 })).toBe('Invoices that made R100 or more');
     expect(describeFilter({ min: 0, max: 5 })).toBe('Invoices with a profit between R0 and R5');
+  });
+});
+
+describe('fetchDocumentLines', () => {
+  // Stub pool: hands back the header recordset for the header query and the
+  // line recordset for the line query, so the sign convention and the
+  // reconciliation logic can be pinned without a live Sage.
+  const stubPool = (header, lines) => ({
+    request: () => ({
+      input() { return this; },
+      query(sqlText) {
+        const isHeader = /OEINVH|OECRDH/.test(sqlText);
+        return Promise.resolve({ recordset: isHeader ? (header ? [header] : []) : lines });
+      },
+    }),
+  });
+
+  const invHeader = { doc_number: 'IN000433366', ymd: 20260701, customer_code: '5115', customer_name: 'N17 LIQUOR EXPRESS', selling: 2196.52 };
+  const invLines = [
+    { line_no: 16, item: '86', description: 'CAMEL BLUE BOX 20s', qty: 1, uom: 'CTN', unit_price: 532.18, discount: 0, selling: 532.18, cost: 518.70 },
+    { line_no: 32, item: '65', description: 'CAMEL DOUBLE & PURPLE', qty: 1, uom: 'CTN', unit_price: 410.19, discount: 0, selling: 410.19, cost: 397.13 },
+  ];
+
+  it('rejects an unknown document type by name', async () => {
+    await expect(fetchDocumentLines({ pool: stubPool(invHeader, []), type: 'quote', uniq: '1' }))
+      .rejects.toThrow(/unknown document type/i);
+  });
+
+  it('rejects a non-numeric document id rather than interpolating it', async () => {
+    for (const bad of ["1; DROP TABLE OEINVH", '', 'abc']) {
+      await expect(fetchDocumentLines({ pool: stubPool(invHeader, []), type: 'invoice', uniq: bad }))
+        .rejects.toThrow(/must be numeric/i);
+    }
+  });
+
+  it('says so plainly when the document no longer exists', async () => {
+    await expect(fetchDocumentLines({ pool: stubPool(null, []), type: 'invoice', uniq: '99' }))
+      .rejects.toThrow(/no invoice found in Sage with id 99/i);
+  });
+
+  it('computes per-line profit and margin', async () => {
+    const r = await fetchDocumentLines({ pool: stubPool(invHeader, invLines), type: 'invoice', uniq: '1' });
+    expect(r.lines).toHaveLength(2);
+    expect(round(r.lines[0].profit)).toBe(13.48);
+    expect(round(r.lines[0].margin)).toBe(2.53);
+    expect(r.doc_number).toBe('IN000433366');
+    expect(r.date).toBe('2026-07-01');
+  });
+
+  it('takes totals from the header selling so the detail ties to the row that opened it', async () => {
+    const r = await fetchDocumentLines({ pool: stubPool(invHeader, invLines), type: 'invoice', uniq: '1' });
+    expect(r.totals.selling).toBe(2196.52);       // header, not the 2 stub lines
+    expect(round(r.totals.cost)).toBe(915.83);    // summed from the lines
+    expect(round(r.totals.profit)).toBe(round(2196.52 - 915.83));
+  });
+
+  it('reports a document-level adjustment when the lines do not account for the header', async () => {
+    // Header 2196.52 vs lines 942.37 -> the rest belongs to no single line.
+    const r = await fetchDocumentLines({ pool: stubPool(invHeader, invLines), type: 'invoice', uniq: '1' });
+    expect(r.adjustment).not.toBeNull();
+    expect(round(r.adjustment)).toBe(round(2196.52 - 942.37));
+  });
+
+  it('reports no adjustment when the lines reconcile exactly', async () => {
+    const exact = { ...invHeader, selling: 942.37 };
+    const r = await fetchDocumentLines({ pool: stubPool(exact, invLines), type: 'invoice', uniq: '1' });
+    expect(r.adjustment).toBeNull();
+  });
+
+  it('ignores sub-cent rounding rather than showing a R0.00 adjustment row', async () => {
+    const nearly = { ...invHeader, selling: 942.38 };
+    const r = await fetchDocumentLines({ pool: stubPool(nearly, invLines), type: 'invoice', uniq: '1' });
+    expect(r.adjustment).toBeNull();
   });
 });

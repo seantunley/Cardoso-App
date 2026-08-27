@@ -40,6 +40,15 @@ function fetchProfit(from, to, f) {
     });
 }
 
+function fetchDocumentLines(type, uniq) {
+  const qs = new URLSearchParams({ type, uniq });
+  return fetch(`/api/reports/invoice-profit/document?${qs.toString()}`, { credentials: 'include' })
+    .then(async (r) => {
+      if (!r.ok) { const b = await r.json().catch(() => ({})); throw new Error(b.error || `HTTP ${r.status}`); }
+      return r.json();
+    });
+}
+
 // Profit and margin read red below zero — a loss-making day should be obvious
 // at a glance, not something you have to spot the minus sign for.
 const toneFor = (v) => (v < 0 ? 'text-red-400' : v > 0 ? 'text-emerald-500' : 'text-muted-foreground');
@@ -92,6 +101,85 @@ function TotalsCells({ totals, bold }) {
       <td className="px-3 py-1.5 text-right"><Money v={totals.cost} bold={bold} /></td>
       <td className="px-3 py-1.5 text-right border-l border-border/40"><Profit v={totals.profit} bold={bold} /></td>
       <td className="px-3 py-1.5 text-right"><Margin v={totals.margin} profit={totals.profit} bold={bold} /></td>
+    </>
+  );
+}
+
+// ── Line detail ─────────────────────────────────────────────────────────────
+// The stock lines behind one document, fetched on demand. Rendered as rows of
+// the same table so the money columns stay aligned with everything above.
+function DocumentLines({ doc, colSpan }) {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['invoice-profit-doc', doc.doc_type, doc.doc_uniq],
+    queryFn: () => fetchDocumentLines(doc.doc_type, doc.doc_uniq),
+    staleTime: 5 * 60_000,
+  });
+
+  if (isLoading) {
+    return (
+      <tr className="bg-background/60"><td colSpan={colSpan} className="px-3 py-2 pl-20 font-mono text-[11px] text-muted-foreground">Loading lines…</td></tr>
+    );
+  }
+  if (error) {
+    return (
+      <tr className="bg-background/60"><td colSpan={colSpan} className="px-3 py-2 pl-20 text-xs text-destructive">{error.message}</td></tr>
+    );
+  }
+  const lines = data?.lines || [];
+  if (!lines.length) {
+    return (
+      <tr className="bg-background/60"><td colSpan={colSpan} className="px-3 py-2 pl-20 text-xs text-muted-foreground">This document has no stock lines.</td></tr>
+    );
+  }
+
+  return (
+    <>
+      <tr className="bg-background/60">
+        <td colSpan={2} className="px-3 pt-2 pb-1 pl-20 font-mono text-[10px] uppercase tracking-wider text-muted-subtle">
+          Item · description
+        </td>
+        <td className="px-3 pt-2 pb-1 text-right font-mono text-[10px] uppercase tracking-wider text-muted-subtle" colSpan={2}>Qty × price</td>
+        <td className="px-3 pt-2 pb-1 text-right font-mono text-[10px] uppercase tracking-wider text-muted-subtle border-l border-border/40">Selling</td>
+        <td className="px-3 pt-2 pb-1 text-right font-mono text-[10px] uppercase tracking-wider text-muted-subtle">Cost</td>
+        <td className="px-3 pt-2 pb-1 text-right font-mono text-[10px] uppercase tracking-wider text-muted-subtle border-l border-border/40">Profit</td>
+        <td className="px-3 pt-2 pb-1 text-right font-mono text-[10px] uppercase tracking-wider text-muted-subtle">Margin</td>
+      </tr>
+      {lines.map((l) => (
+        <tr key={l.line_no} className="bg-background/60 border-b border-border/10">
+          <td className="px-3 py-1 pl-20 font-mono text-[11px]">{l.item}</td>
+          <td className="px-3 py-1 text-[11px] text-muted-foreground">{l.description}</td>
+          <td className="px-3 py-1 text-right text-[11px] tabular-nums text-muted-foreground" colSpan={2}>
+            {fmtCount(l.qty)}{l.uom ? ` ${l.uom}` : ''} × <span className="text-muted-subtle">R </span>{fmtRSigned(l.unit_price)}
+            {!!l.discount && <span className="ml-1 text-muted-subtle">less R {fmtRSigned(l.discount)}</span>}
+          </td>
+          <td className="px-3 py-1 text-right text-[11px] border-l border-border/40"><Money v={l.selling} /></td>
+          <td className="px-3 py-1 text-right text-[11px]"><Money v={l.cost} /></td>
+          <td className="px-3 py-1 text-right text-[11px] border-l border-border/40"><Profit v={l.profit} /></td>
+          <td className="px-3 py-1 text-right text-[11px]"><Margin v={l.margin} profit={l.profit} /></td>
+        </tr>
+      ))}
+      {/* A handful of Sage documents carry a charge or discount that belongs to
+          no single line. Show it, so the lines always add up to the invoice. */}
+      {data?.adjustment != null && (
+        <tr className="bg-background/60 border-b border-border/10">
+          <td colSpan={4} className="px-3 py-1 pl-20 text-[11px] italic text-muted-foreground">
+            Document-level adjustment (not attributable to a line)
+          </td>
+          <td className="px-3 py-1 text-right text-[11px] border-l border-border/40"><Money v={data.adjustment} /></td>
+          <td className="px-3 py-1" />
+          <td className="px-3 py-1 text-right text-[11px] border-l border-border/40"><Profit v={data.adjustment} /></td>
+          <td className="px-3 py-1" />
+        </tr>
+      )}
+      <tr className="bg-background/60 border-b border-border/30">
+        <td colSpan={4} className="px-3 py-1 pl-20 font-mono text-[10px] uppercase tracking-wider text-muted-subtle">
+          {doc.doc_number} · {lines.length} {lines.length === 1 ? 'line' : 'lines'}
+        </td>
+        <td className="px-3 py-1 text-right text-[11px] border-l border-border/40"><Money v={data.totals.selling} bold /></td>
+        <td className="px-3 py-1 text-right text-[11px]"><Money v={data.totals.cost} bold /></td>
+        <td className="px-3 py-1 text-right text-[11px] border-l border-border/40"><Profit v={data.totals.profit} bold /></td>
+        <td className="px-3 py-1 text-right text-[11px]"><Margin v={data.totals.margin} profit={data.totals.profit} bold /></td>
+      </tr>
     </>
   );
 }
@@ -150,6 +238,14 @@ export default function InvoiceProfit() {
     downloadCsv(`invoice-profit-${from}-to-${to}.csv`, [header, ...rows]);
   };
 
+  const exportPdf = async () => {
+    try {
+      await downloadReport(`/api/reports/invoice-profit/export.pdf?${profitQuery(from, to, filter)}`, `invoice-profit-${from}-to-${to}.pdf`);
+    } catch (e) {
+      toast.error(`Could not download the Invoice Profit PDF: ${e.message}`);
+    }
+  };
+
   const exportExcel = async () => {
     try {
       await downloadReport(`/api/reports/invoice-profit/export?${profitQuery(from, to, filter)}`, `invoice-profit-${from}-to-${to}.xlsx`);
@@ -171,6 +267,7 @@ export default function InvoiceProfit() {
       orientation="landscape"
       onExportCsv={months.length ? exportCsv : undefined}
       onExportExcel={months.length ? exportExcel : undefined}
+      onExportPdf={months.length ? exportPdf : undefined}
       onPrint={() => window.print()}
       isLoading={isLoading}
       error={error?.message}
@@ -357,10 +454,17 @@ export default function InvoiceProfit() {
                                     <TotalsCells totals={d.totals} />
                                   </tr>
 
-                                  {dOpen && d.documents.map((doc) => (
-                                    <tr key={`${dKey}/${doc.doc_type}/${doc.doc_number}`} className="border-b border-border/20 bg-background/40 hover:bg-muted/10">
+                                  {dOpen && d.documents.map((doc) => {
+                                    const docKey = `${dKey}/${doc.doc_type}/${doc.doc_number}`;
+                                    const docOpen = !!expanded[docKey];
+                                    return (
+                                    <Fragment key={docKey}>
+                                    <tr
+                                      className="border-b border-border/20 bg-background/40 hover:bg-muted/10 cursor-pointer"
+                                      onClick={() => toggle(docKey)}
+                                    >
                                       <td className="px-3 py-1 pl-16 font-mono text-xs">
-                                        {doc.doc_number}
+                                        <Chevron open={docOpen} /> {doc.doc_number}
                                         {doc.doc_type === 'credit_note' && (
                                           <span className="ml-2 rounded px-1 py-0.5 text-[9px] uppercase tracking-wider text-red-400 border border-red-400/40">CN</span>
                                         )}
@@ -375,7 +479,10 @@ export default function InvoiceProfit() {
                                       <td className="px-3 py-1 text-right border-l border-border/40"><Profit v={doc.profit} /></td>
                                       <td className="px-3 py-1 text-right"><Margin v={doc.margin} profit={doc.profit} /></td>
                                     </tr>
-                                  ))}
+                                    {docOpen && <DocumentLines doc={doc} colSpan={8} />}
+                                    </Fragment>
+                                    );
+                                  })}
                                 </Fragment>
                               );
                             })}
