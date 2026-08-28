@@ -1634,8 +1634,9 @@ const RELEASES = {
       "This update fixes an issue in BAT reconciliation where invoices with a " +
       "failed OCR scan were silently excluded from the 'OCR failed' filter. " +
       "The filter now captures every invoice that OCR could not process, the " +
-      "header badge matches what the filter shows, and any filter that returns " +
-      "no results displays a clear message instead of a blank list.",
+      "header badge now uses the same definition of 'OCR failed' as the filter, " +
+      "and any filter that returns no results displays a clear message instead " +
+      "of a blank list.",
     sections: [
       {
         label: 'FIXED',
@@ -1650,8 +1651,8 @@ const RELEASES = {
               "invoices with a 'not found' status appeared. The filter now " +
               "correctly shows every invoice that OCR could not process, " +
               "regardless of the specific failure type. The 'OCR failed' count " +
-              "in the header reflects the same definition, so the badge and the " +
-              "filter always agree. If a filter or tab returns no matching " +
+              "in the header now uses the same definition — both cover every " +
+              "invoice OCR could not process. If a filter or tab returns no matching " +
               "invoices, a descriptive message is now shown in place of a blank " +
               "list, indicating which filter is active and pointing to the " +
               "correct tab when relevant.",

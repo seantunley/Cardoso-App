@@ -10,7 +10,7 @@
 endobj
 4 0 obj
 <<
-/Length 3480
+/Length 3516
 >>
 stream
 0.5670000000000001 w
@@ -46,8 +46,8 @@ BT
 51.0236220472441033 717.1655905511811397 Td
 (This update fixes an issue in BAT reconciliation where invoices with a failed OCR scan were silently) Tj
 T* (excluded from the 'OCR failed' filter. The filter now captures every invoice that OCR could not process, the) Tj
-T* (header badge matches what the filter shows, and any filter that returns no results displays a clear) Tj
-T* (message instead of a blank list.) Tj
+T* (header badge now uses the same definition of 'OCR failed' as the filter, and any filter that returns no) Tj
+T* (results displays a clear message instead of a blank list.) Tj
 ET
 BT
 /F2 13 Tf
@@ -99,9 +99,9 @@ BT
 T* (errored during scanning \(shown with a red 'Failed' badge\) were being silently excluded — only) Tj
 T* (invoices with a 'not found' status appeared. The filter now correctly shows every invoice that) Tj
 T* (OCR could not process, regardless of the specific failure type. The 'OCR failed' count in the) Tj
-T* (header reflects the same definition, so the badge and the filter always agree. If a filter or tab) Tj
-T* (returns no matching invoices, a descriptive message is now shown in place of a blank list,) Tj
-T* (indicating which filter is active and pointing to the correct tab when relevant.) Tj
+T* (header now uses the same definition — both cover every invoice OCR could not process. If a) Tj
+T* (filter or tab returns no matching invoices, a descriptive message is now shown in place of a) Tj
+T* (blank list, indicating which filter is active and pointing to the correct tab when relevant.) Tj
 ET
 0.87 0.89 0.91 RG
 0.8503937007874016 w
@@ -294,7 +294,7 @@ endobj
 19 0 obj
 <<
 /Producer (jsPDF 4.2.1)
-/CreationDate (D:20260828062044-00'00')
+/CreationDate (D:20260828062505-00'00')
 >>
 endobj
 20 0 obj
@@ -308,33 +308,33 @@ endobj
 xref
 0 21
 0000000000 65535 f 
-0000003684 00000 n 
-0000005501 00000 n 
+0000003720 00000 n 
+0000005537 00000 n 
 0000000015 00000 n 
 0000000152 00000 n 
-0000003741 00000 n 
-0000003866 00000 n 
-0000003996 00000 n 
-0000004129 00000 n 
-0000004266 00000 n 
-0000004389 00000 n 
-0000004518 00000 n 
-0000004650 00000 n 
-0000004786 00000 n 
-0000004914 00000 n 
-0000005041 00000 n 
-0000005170 00000 n 
-0000005303 00000 n 
-0000005405 00000 n 
-0000005749 00000 n 
-0000005835 00000 n 
+0000003777 00000 n 
+0000003902 00000 n 
+0000004032 00000 n 
+0000004165 00000 n 
+0000004302 00000 n 
+0000004425 00000 n 
+0000004554 00000 n 
+0000004686 00000 n 
+0000004822 00000 n 
+0000004950 00000 n 
+0000005077 00000 n 
+0000005206 00000 n 
+0000005339 00000 n 
+0000005441 00000 n 
+0000005785 00000 n 
+0000005871 00000 n 
 trailer
 <<
 /Size 21
 /Root 20 0 R
 /Info 19 0 R
-/ID [ <C4A5808CF955828E744930BF3FCD2CC0> <C4A5808CF955828E744930BF3FCD2CC0> ]
+/ID [ <151A56BADD9DD3AC70C3741F5839AE54> <151A56BADD9DD3AC70C3741F5839AE54> ]
 >>
 startxref
-5939
+5975
 %%EOF
