@@ -807,6 +807,10 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     const scope = siteIdFilter(req, res, 't.site_id');
     const periodType = PERIOD_TYPES.includes(String(query.period || '')) ? String(query.period) : 'month';
     const siteFilter = String(query.site || 'all').trim();
+    // Narrowing predicate, applied to the financial rows AND to the coverage and
+    // freshness figures that describe them.
+    const where = siteFilter !== 'all' ? 'AND COALESCE(hs.name, t.site_id) = ?' : '';
+    const params = siteFilter !== 'all' ? [siteFilter] : [];
     // How far back each period type is worth showing.
     const limits = { day: 60, week: 26, month: 24, year: 5 };
 
@@ -817,24 +821,32 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     // is exactly what a staggered rollout looks like: one branch still 404s on
     // the new endpoint and nothing on screen says so.
     const siteScope = siteIdFilter(req, res, 'id');
-    const allSites = prep(`
+    // The dropdown always offers every branch the USER may see, so narrowing to
+    // one branch does not remove the way back to the others.
+    const selectableSites = prep(`
       SELECT id, COALESCE(name, id) AS site_name
       FROM hub_sites
       WHERE 1 = 1 ${siteScope.sql}
       ORDER BY site_name`).all(...siteScope.params);
 
+    // ...but coverage describes what is actually ON SCREEN. With one branch
+    // selected, its totals must not sit under "1 of 6 branches" beside missing
+    // and stale notices about five branches this view does not include.
+    const allSites = siteFilter !== 'all'
+      ? selectableSites.filter((r) => r.site_name === siteFilter)
+      : selectableSites;
+
     const reporting = new Set(prep(`
       SELECT DISTINCT t.site_id
       FROM hub_invoice_profit_day t
-      WHERE 1 = 1 ${scope.sql}`).all(...scope.params).map((r) => r.site_id));
+      LEFT JOIN hub_sites hs ON hs.id = t.site_id
+      WHERE 1 = 1 ${scope.sql} ${where}`).all(...scope.params, ...params).map((r) => r.site_id));
 
-    const sites = allSites.map((r) => r.site_name).filter(Boolean);
+    const sites = selectableSites.map((r) => r.site_name).filter(Boolean);
     // Named, not counted — "2 branches missing" sends someone hunting; naming
     // them says which sync to go and look at.
     const missingBranches = allSites.filter((r) => !reporting.has(r.id)).map((r) => r.site_name);
 
-    const where = siteFilter !== 'all' ? 'AND COALESCE(hs.name, t.site_id) = ?' : '';
-    const params = siteFilter !== 'all' ? [siteFilter] : [];
     const rows = prep(`
       SELECT t.site_id, COALESCE(hs.name, t.site_id) AS site_name, hs.url AS site_url,
              t.day, t.selling, t.cost, t.invoice_count, t.credit_note_count, t.synced_at
@@ -958,6 +970,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
       branches_expected: allSites.length,
       branches_reporting: reporting.size,
       missing_branches: missingBranches,
+      site_filter: siteFilter === 'all' ? null : siteFilter,
       // An empty rollup means the ETL has not run, NOT that nothing was sold -
       // say which, rather than showing a convincing R0.
       empty_reason: periods.length

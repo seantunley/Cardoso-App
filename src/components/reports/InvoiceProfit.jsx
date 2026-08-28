@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ReportFrame, PrintHeader, PrintFooter, fmtRSigned, fmtCount, downloadCsv, downloadReport } from './lib';
+import BranchFilter from './BranchFilter';
 
 // Invoice Profit — every invoice's selling, cost and profit, nested
 // Month → ISO Week → Day → invoice, with a to-date strip across the top.
@@ -24,9 +25,13 @@ const monthStartISO = () => { const d = new Date(); return `${d.getFullYear()}-$
 
 // Filter state -> query string, shared by the fetch and the Excel download so a
 // downloaded workbook always matches the filtered screen.
-function profitQuery(from, to, f, periodType) {
+function profitQuery(from, to, f, periodType, site) {
   const qs = new URLSearchParams({ from, to });
   if (periodType) qs.set('period', periodType);
+  // The hub's branch filter. Without this the backend never saw it, so a shared
+  // ?site=<branch> link — or one carried over from another hub report — silently
+  // returned every branch instead.
+  if (site && site !== 'all') qs.set('site', site);
   if (f.mode === 'losses') qs.set('losses', '1');
   if (f.mode === 'range') {
     if (f.min !== '') qs.set('min', f.min);
@@ -36,8 +41,8 @@ function profitQuery(from, to, f, periodType) {
   return qs.toString();
 }
 
-function fetchProfit(from, to, f, periodType) {
-  return fetch(`/api/reports/invoice-profit?${profitQuery(from, to, f, periodType)}`, { credentials: 'include' })
+function fetchProfit(from, to, f, periodType, site) {
+  return fetch(`/api/reports/invoice-profit?${profitQuery(from, to, f, periodType, site)}`, { credentials: 'include' })
     .then(async (r) => {
       if (!r.ok) { const b = await r.json().catch(() => ({})); throw new Error(b.error || `HTTP ${r.status}`); }
       return r.json();
@@ -219,6 +224,7 @@ function HubPeriods({ data, periodType, onPeriodType, open, setOpen }) {
             </button>
           ))}
         </div>
+        <div className="min-w-[11rem]"><BranchFilter hubMode sites={data?.filters?.sites} /></div>
         {data?.last_synced_at && (
           // The OLDEST contributing branch sync, not the newest: the figures are
           // only as fresh as the branch that last updated.
@@ -383,6 +389,8 @@ export default function InvoiceProfit() {
   const from = isDate(searchParams.get('from')) ? searchParams.get('from') : monthStartISO();
   const to = isDate(searchParams.get('to')) ? searchParams.get('to') : todayISO();
   const periodType = PERIOD_KEYS.includes(searchParams.get('period')) ? searchParams.get('period') : 'month';
+  // Hub branch filter, owned by the shared BranchFilter control via the URL.
+  const site = searchParams.get('site') || 'all';
 
   const filter = useMemo(() => {
     const losses = ['1', 'true', 'yes', 'on'].includes(String(searchParams.get('losses') || '').toLowerCase());
@@ -429,8 +437,8 @@ export default function InvoiceProfit() {
   const [hubOpen, setHubOpen] = useState({});
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['invoice-profit', from, to, filter.mode, filter.min, filter.max, filter.unit, periodType],
-    queryFn: () => fetchProfit(from, to, filter, periodType),
+    queryKey: ['invoice-profit', from, to, filter.mode, filter.min, filter.max, filter.unit, periodType, site],
+    queryFn: () => fetchProfit(from, to, filter, periodType, site),
     staleTime: 60_000,
   });
 
@@ -477,7 +485,7 @@ export default function InvoiceProfit() {
 
   const exportPdf = async () => {
     try {
-      await downloadReport(`/api/reports/invoice-profit/export.pdf?${profitQuery(from, to, filter)}`, `invoice-profit-${from}-to-${to}.pdf`);
+      await downloadReport(`/api/reports/invoice-profit/export.pdf?${profitQuery(from, to, filter, periodType, site)}`, `invoice-profit-${from}-to-${to}.pdf`);
     } catch (e) {
       toast.error(`Could not download the Invoice Profit PDF: ${e.message}`);
     }
@@ -485,7 +493,7 @@ export default function InvoiceProfit() {
 
   const exportExcel = async () => {
     try {
-      await downloadReport(`/api/reports/invoice-profit/export?${profitQuery(from, to, filter)}`, `invoice-profit-${from}-to-${to}.xlsx`);
+      await downloadReport(`/api/reports/invoice-profit/export?${profitQuery(from, to, filter, periodType, site)}`, `invoice-profit-${from}-to-${to}.xlsx`);
     } catch (e) {
       toast.error(`Could not download the Invoice Profit workbook: ${e.message}`);
     }
@@ -561,9 +569,11 @@ export default function InvoiceProfit() {
             isHub
               // Say the coverage, don't assert completeness: "All branches" on a
               // printout covering 1 of 6 is the whole problem.
-              ? (data?.branches_expected
-                ? `${data.branches_reporting} of ${data.branches_expected} branches · totals only`
-                : 'Totals only')
+              ? (data?.site_filter
+                ? `${data.site_filter} · totals only`
+                : data?.branches_expected
+                  ? `${data.branches_reporting} of ${data.branches_expected} branches · totals only`
+                  : 'Totals only')
               : 'Ex-VAT, in Rand (R)',
             'Credit notes netted off',
             'Inter-branch transfers excluded',
