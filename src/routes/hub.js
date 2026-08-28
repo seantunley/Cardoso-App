@@ -1388,6 +1388,11 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       db.prepare('DELETE FROM hub_sync_log').run();
       db.prepare('DELETE FROM hub_records').run();
       db.prepare('DELETE FROM hub_inventory').run();
+      // Profit day totals are pulled INCREMENTALLY: the ETL resumes from the
+      // newest day it already holds. Leaving them here would make a "full
+      // re-pull" start 30 days back and quietly keep the very rows the operator
+      // pressed this button to replace.
+      try { db.prepare('DELETE FROM hub_invoice_profit_day').run(); } catch { /* table may pre-date the v110 migration */ }
       logAudit({
         req, action: 'hub_force_resync_all', resourceType: 'system',
         resourceName: 'All hub sites',
@@ -1419,6 +1424,9 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       db.prepare("DELETE FROM hub_sync_log WHERE site_id = ?").run(siteId);
       db.prepare("DELETE FROM hub_records WHERE site_id = ?").run(siteId);
       db.prepare("DELETE FROM hub_inventory WHERE site_id = ?").run(siteId);
+      // See the all-sites route: the profit stage resumes from its newest stored
+      // day, so it has to be cleared for a force-resync to actually re-pull.
+      try { db.prepare("DELETE FROM hub_invoice_profit_day WHERE site_id = ?").run(siteId); } catch { /* table may pre-date the v110 migration */ }
       const site = db.prepare('SELECT slug, name FROM hub_sites WHERE id = ?').get(siteId);
       logAudit({
         req, action: 'hub_force_resync_site', resourceType: 'system',

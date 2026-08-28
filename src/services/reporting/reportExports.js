@@ -522,6 +522,11 @@ export async function buildSalesByVendorXlsx(report) {
 //   Invoices — every document, one row each (the sheet people pivot on)
 //   Notes    — what the numbers mean and what was excluded, so a workbook that
 //              gets emailed on can still explain itself
+// A month the range clips is labelled with what it actually covers. Same idea as
+// the "(part)" already carried by week rows — an unqualified "August 2026" over
+// twelve days of August is the kind of thing that gets pasted into a board pack.
+const profitMonthLabel = (m) => (m?.partial ? `${m.label} (part · ${m.covered_start} – ${m.covered_end})` : m?.label || '');
+
 const PROFIT_MONEY = '#,##0.00';
 const PROFIT_PCT = '0.00"%"';
 
@@ -556,7 +561,7 @@ export async function buildInvoiceProfitXlsx(report) {
   };
 
   for (const m of report?.months || []) {
-    addTotalsRow('Month', m.label, m.totals).font = { bold: true };
+    addTotalsRow('Month', profitMonthLabel(m), m.totals).font = { bold: true };
     for (const w of m.weeks || []) {
       const label = `    ${w.label}${w.partial ? ' (part)' : ''} · ${w.week_start} – ${w.week_end}`;
       addTotalsRow('Week', label, w.totals);
@@ -667,7 +672,7 @@ export function buildInvoiceProfitPdf(report) {
 
   const body = [];
   for (const m of report?.months || []) {
-    body.push({ level: 'month', cells: [m.label, String(m.totals.invoice_count), fmtR(m.totals.selling), fmtR(m.totals.cost), profitSigned(m.totals.profit), profitPct(m.totals.margin)] });
+    body.push({ level: 'month', cells: [profitMonthLabel(m), String(m.totals.invoice_count), fmtR(m.totals.selling), fmtR(m.totals.cost), profitSigned(m.totals.profit), profitPct(m.totals.margin)] });
     for (const w of m.weeks || []) {
       const label = `   ${w.label}${w.partial ? ' (part)' : ''}  ${w.week_start} – ${w.week_end}`;
       body.push({ level: 'week', cells: [label, String(w.totals.invoice_count), fmtR(w.totals.selling), fmtR(w.totals.cost), profitSigned(w.totals.profit), profitPct(w.totals.margin)] });

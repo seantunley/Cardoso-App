@@ -805,11 +805,13 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   const buildHubProfitTotals = (req, res) => {
     const query = req.query || {};
     const scope = siteIdFilter(req, res, 't.site_id');
+    const syncScope = siteIdFilter(req, res, 'w.site_id');
     const periodType = PERIOD_TYPES.includes(String(query.period || '')) ? String(query.period) : 'month';
     const siteFilter = String(query.site || 'all').trim();
     // Narrowing predicate, applied to the financial rows AND to the coverage and
     // freshness figures that describe them.
     const where = siteFilter !== 'all' ? 'AND COALESCE(hs.name, t.site_id) = ?' : '';
+    const syncWhere = siteFilter !== 'all' ? 'AND COALESCE(hs.name, w.site_id) = ?' : '';
     const params = siteFilter !== 'all' ? [siteFilter] : [];
     // How far back each period type is worth showing.
     const limits = { day: 60, week: 26, month: 24, year: 5 };
@@ -836,11 +838,17 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
       ? selectableSites.filter((r) => r.site_name === siteFilter)
       : selectableSites;
 
-    const reporting = new Set(prep(`
-      SELECT DISTINCT t.site_id
-      FROM hub_invoice_profit_day t
-      LEFT JOIN hub_sites hs ON hs.id = t.site_id
-      WHERE 1 = 1 ${scope.sql} ${where}`).all(...scope.params, ...params).map((r) => r.site_id));
+    // "Has this branch reported?" comes from the SYNC WATERMARK, not from whether
+    // it has any day rows. A branch that legitimately traded nothing in the
+    // window contributes a correct zero, and inferring coverage from activity
+    // would brand it missing for ever while its sync ran perfectly.
+    const syncRows = prep(`
+      SELECT w.site_id, w.synced_at, w.day_count
+      FROM hub_invoice_profit_sync w
+      LEFT JOIN hub_sites hs ON hs.id = w.site_id
+      WHERE 1 = 1 ${syncScope.sql} ${syncWhere}`).all(...syncScope.params, ...params);
+    const reporting = new Set(syncRows.map((r) => r.site_id));
+    const syncedAtBySite = new Map(syncRows.map((r) => [r.site_id, r.synced_at]));
 
     const sites = selectableSites.map((r) => r.site_name).filter(Boolean);
     // Named, not counted — "2 branches missing" sends someone hunting; naming
@@ -863,11 +871,25 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     for (const r of rows) {
       let site = bySite.get(r.site_id);
       if (!site) {
-        site = { site_id: r.site_id, site_name: r.site_name, site_url: r.site_url, synced_at: r.synced_at, days: [] };
+        site = { site_id: r.site_id, site_name: r.site_name, site_url: r.site_url, synced_at: syncedAtBySite.get(r.site_id) || r.synced_at, days: [] };
         bySite.set(r.site_id, site);
       }
       if (r.synced_at && (!site.synced_at || r.synced_at > site.synced_at)) site.synced_at = r.synced_at;
       site.days.push(r);
+    }
+    // Branches that synced successfully but hold no days still exist for
+    // freshness purposes — otherwise a zero-trade branch can never be seen to
+    // have gone stale either.
+    for (const r of syncRows) {
+      if (!bySite.has(r.site_id)) {
+        const meta = selectableSites.find((x) => x.id === r.site_id);
+        bySite.set(r.site_id, { site_id: r.site_id, site_name: meta?.site_name || r.site_id, site_url: null, synced_at: r.synced_at, days: [] });
+      } else if (r.synced_at) {
+        const site = bySite.get(r.site_id);
+        // The watermark is authoritative: it is written on every successful
+        // pull, while a day row's stamp only moves when that day changes.
+        if (!site.synced_at || r.synced_at > site.synced_at) site.synced_at = r.synced_at;
+      }
     }
 
     const byPeriod = new Map();

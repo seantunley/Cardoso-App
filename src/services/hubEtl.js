@@ -643,6 +643,12 @@ async function syncSite(site) {
         db.prepare('DELETE FROM hub_invoice_profit_day WHERE site_id = ? AND day >= ? AND day <= ?')
           .run(site.id, prData?.from || from, prData?.to || isoToday);
         const now = new Date().toISOString();
+        // Written whether or not any days came back: a branch that legitimately
+        // traded nothing in the window has synced successfully and must not be
+        // reported as missing.
+        db.prepare(`
+          INSERT OR REPLACE INTO hub_invoice_profit_sync (site_id, synced_at, window_from, window_to, day_count)
+          VALUES (?, ?, ?, ?, ?)`).run(site.id, now, prData?.from || from, prData?.to || isoToday, days.length);
         for (const d of days) {
           if (!d?.day) continue;
           upsertDay.run({

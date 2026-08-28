@@ -32,6 +32,20 @@ export default {
       );
       CREATE INDEX IF NOT EXISTS idx_hub_invoice_profit_day
         ON hub_invoice_profit_day (day);
+
+      -- One row per site recording that the profit stage SUCCEEDED, kept apart
+      -- from the day rows because "no trade" and "no sync" are different facts
+      -- that look identical in an activity table. A newly registered branch with
+      -- no invoices in the window is contributing a correct zero; without this
+      -- watermark it was reported as missing for ever, under a permanent
+      -- incomplete-data warning, while its sync ran perfectly every 5 minutes.
+      CREATE TABLE IF NOT EXISTS hub_invoice_profit_sync (
+        site_id     TEXT PRIMARY KEY,
+        synced_at   TEXT,
+        window_from TEXT,
+        window_to   TEXT,
+        day_count   INTEGER DEFAULT 0
+      );
     `);
   },
 };

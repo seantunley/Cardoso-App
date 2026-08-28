@@ -466,7 +466,9 @@ export default function InvoiceProfit() {
       : [];
     const totalsRow = (level, label, t) => [level, label, '', '', t.invoice_count, t.credit_note_count, cell(t.selling), cell(t.cost), cell(t.profit), cell(t.margin)];
     for (const m of months) {
-      rows.push(totalsRow('Month', m.label, m.totals));
+      // Marked the same way as the screen and the workbook: a clipped month must
+      // not read as a whole one once the file leaves the app.
+      rows.push(totalsRow('Month', m.partial ? `${m.label} (part ${m.covered_start}–${m.covered_end})` : m.label, m.totals));
       for (const w of m.weeks) {
         rows.push(totalsRow('Week', `${w.label}${w.partial ? ' (part)' : ''} ${w.week_start}–${w.week_end}`, w.totals));
         for (const d of w.days) {
