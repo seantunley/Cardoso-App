@@ -1625,6 +1625,42 @@ const RELEASES = {
   ],
   },
 
+  '2026-08-27': {
+    product: 'Cardoso App',
+    title: 'Product Update',
+    date: '27 Aug 2026',
+    slug: '27-Aug-2026',
+    intro:
+      "This update fixes an issue in BAT reconciliation where invoices with a " +
+      "failed OCR scan were silently excluded from the 'OCR failed' filter. " +
+      "The filter now captures every invoice that OCR could not process, the " +
+      "header badge matches what the filter shows, and any filter that returns " +
+      "no results displays a clear message instead of a blank list.",
+    sections: [
+      {
+        label: 'FIXED',
+        heading: 'Fixes',
+        items: [
+          {
+            title: "BAT reconciliation — 'OCR failed' filter now captures all failed scans",
+            body:
+              "When filtering the invoice list in BAT reconciliation for 'OCR " +
+              "failed', invoices that had actually errored during scanning (shown " +
+              "with a red 'Failed' badge) were being silently excluded — only " +
+              "invoices with a 'not found' status appeared. The filter now " +
+              "correctly shows every invoice that OCR could not process, " +
+              "regardless of the specific failure type. The 'OCR failed' count " +
+              "in the header reflects the same definition, so the badge and the " +
+              "filter always agree. If a filter or tab returns no matching " +
+              "invoices, a descriptive message is now shown in place of a blank " +
+              "list, indicating which filter is active and pointing to the " +
+              "correct tab when relevant.",
+          },
+        ],
+      },
+    ],
+  },
+
   '2026-07-20': {
     product: 'Cardoso App',
     title: 'Product Update',
