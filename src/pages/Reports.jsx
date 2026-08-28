@@ -1,7 +1,7 @@
 import { lazy, Suspense, Fragment, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Wallet, Users, BarChart3, PieChart, AlertTriangle, Boxes, Receipt, CalendarDays, FileWarning, Truck } from 'lucide-react';
+import { Wallet, Users, BarChart3, PieChart, AlertTriangle, Boxes, Receipt, CalendarDays, FileWarning, Truck, TrendingUp } from 'lucide-react';
 import { api } from '@/api/apiClient';
 import { hasPermission } from '@/lib/permissions';
 import SavedViews from '@/components/reports/SavedViews';
@@ -19,6 +19,7 @@ const BatExceptionsWeekly = lazy(() => import('@/components/reports/BatException
 const InventoryValue   = lazy(() => import('@/components/reports/InventoryValue'));
 const DailySalesFigures = lazy(() => import('@/components/reports/DailySalesFigures'));
 const SalesByVendor    = lazy(() => import('@/components/reports/SalesByVendor'));
+const InvoiceProfit    = lazy(() => import('@/components/reports/InvoiceProfit'));
 
 const REPORTS = [
   {
@@ -52,6 +53,7 @@ const REPORTS = [
     accent: 'hsl(var(--status-ok))',
     items: [
       { id: 'sales-by-vendor', name: 'Sales by Vendor', icon: Truck, accent: 'hsl(var(--status-ok))', component: SalesByVendor, ready: true },
+      { id: 'invoice-profit',  name: 'Invoice Profit',  icon: TrendingUp, accent: 'hsl(33 95% 55%)', component: InvoiceProfit, ready: true },
     ],
   },
   {
@@ -63,15 +65,27 @@ const REPORTS = [
   },
 ];
 
+// Reports whose API sits behind can_access_monthly_reports. Module scope so the
+// useMemo below has a stable reference.
+const MONTHLY_ONLY = ['daily-sales', 'invoice-profit'];
+// Every report id, gated or not — used to tell "a report you may not open" from
+// "not a report at all" while permissions are still loading.
+const ALL_REPORT_IDS = REPORTS.flatMap((g) => g.items.map((i) => i.id));
+
 export default function Reports() {
-  const { data: currentUser } = useQuery({ queryKey: ["currentUser"], queryFn: () => api.auth.me(), staleTime: Infinity });
+  const { data: currentUser, isPending: userPending } = useQuery({ queryKey: ["currentUser"], queryFn: () => api.auth.me(), staleTime: Infinity });
   // Daily Sales Figures exposes the same posted-document figures as Monthly Sales
   // Figures, so it sits behind can_access_monthly_reports. Hide it (and block a
   // direct ?report=daily-sales) for Reports-only users, matching the API guard.
+  //
+  // Invoice Profit shows those same figures PLUS cost and margin, and its API is
+  // gated by the same monthlyReportsGuard — so it hides on exactly the same
+  // permission. Keep this list and the route guards in step: a report visible
+  // here but blocked by the API just renders an error for the user.
   const canMonthly = hasPermission(currentUser, 'can_access_monthly_reports');
   const groups = useMemo(
     () => REPORTS
-      .map((g) => ({ ...g, items: g.items.filter((it) => it.id !== 'daily-sales' || canMonthly) }))
+      .map((g) => ({ ...g, items: g.items.filter((it) => !MONTHLY_ONLY.includes(it.id) || canMonthly) }))
       .filter((g) => g.items.length > 0),
     [canMonthly],
   );
@@ -81,7 +95,17 @@ export default function Reports() {
   // saved views, and browser back/forward all work and the view is shareable.
   const [searchParams, setSearchParams] = useSearchParams();
   const requested = searchParams.get('report');
-  const activeId = allItems.some(i => i.id === requested) ? requested : 'aged-debtors';
+  // Until the permission check has actually answered, a gated report is
+  // UNKNOWN, not forbidden. Falling back to 'aged-debtors' in that window meant
+  // a deep link to Invoice Profit or Daily Sales Figures silently opened a
+  // different report — most visibly right after a backend restart, when
+  // /api/auth/me answers 401 for a moment and the tab vanishes with it. Hold the
+  // requested id and show a loading state instead of substituting another
+  // report and firing its queries.
+  const permissionsSettled = !userPending;
+  const activeId = allItems.some((i) => i.id === requested)
+    ? requested
+    : (!permissionsSettled && ALL_REPORT_IDS.includes(requested) ? requested : 'aged-debtors');
   const setActiveId = (id) =>
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
@@ -143,7 +167,11 @@ export default function Reports() {
         </div>
 
         <main>
-          {active?.component ? (
+          {!active && !permissionsSettled ? (
+            <div className="bg-card border border-border p-12 text-center text-muted-foreground" style={{ borderRadius: '12px' }}>
+              <p className="font-mono text-[11px] uppercase tracking-[0.2em]">Checking access…</p>
+            </div>
+          ) : active?.component ? (
             <Suspense fallback={
               <div className="bg-card border border-border p-12 text-center text-muted-foreground" style={{ borderRadius: '12px' }}>
                 <p className="font-mono text-[11px] uppercase tracking-[0.2em]">Loading report…</p>

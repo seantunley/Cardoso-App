@@ -515,3 +515,203 @@ export async function buildSalesByVendorXlsx(report) {
   sbvStyle(totals, 1);
   return await wb.xlsx.writeBuffer();
 }
+
+// ── Invoice Profit ───────────────────────────────────────────────────────────
+// Three sheets, all built from the same report object the screen renders:
+//   Summary  — the day/week/month rollup, indented the way the report nests
+//   Invoices — every document, one row each (the sheet people pivot on)
+//   Notes    — what the numbers mean and what was excluded, so a workbook that
+//              gets emailed on can still explain itself
+// A month the range clips is labelled with what it actually covers. Same idea as
+// the "(part)" already carried by week rows — an unqualified "August 2026" over
+// twelve days of August is the kind of thing that gets pasted into a board pack.
+const profitMonthLabel = (m) => (m?.partial ? `${m.label} (part · ${m.covered_start} – ${m.covered_end})` : m?.label || '');
+
+const PROFIT_MONEY = '#,##0.00';
+const PROFIT_PCT = '0.00"%"';
+
+// Bold header + frozen top row + sane widths, applied per sheet.
+function profitStyle(ws, headerRow, widths) {
+  ws.getRow(headerRow).font = { bold: true };
+  ws.views = [{ state: 'frozen', ySplit: headerRow }];
+  widths.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+}
+
+export async function buildInvoiceProfitXlsx(report) {
+  const wb = new ExcelJS.Workbook();
+  const t = (x) => (x || { selling: 0, cost: 0, profit: 0, margin: 0, invoice_count: 0, credit_note_count: 0 });
+
+  // ── Summary: Month → Week → Day, indented in the Level column ──────────────
+  const s = wb.addWorksheet('Summary');
+  s.addRow(['Invoice Profit']);
+  s.addRow([report?.site_name || '', `${report?.from || ''} to ${report?.to || ''}`, `generated ${dateOnly()}`]);
+  // A filtered workbook holds only the matching invoices. Emailed on, its
+  // reduced totals would otherwise read as the whole period — so the filter
+  // travels in the metadata, not just in the UI that produced it.
+  if (report?.filter?.active) {
+    s.addRow([`FILTERED: ${report.filter.label}`, `${report.filter.matched} of ${report.filter.of_invoices} invoices`, 'credit notes excluded']);
+  }
+  s.addRow([]);
+  const sHeader = s.rowCount + 1;
+  s.addRow(['Level', 'Period', 'Invoices', 'Credit notes', 'Selling (ex-VAT)', 'Cost', 'Profit', 'Margin %']);
+
+  const addTotalsRow = (level, label, totals) => {
+    const v = t(totals);
+    return s.addRow([level, label, v.invoice_count, v.credit_note_count, num2(v.selling), num2(v.cost), num2(v.profit), num2(v.margin)]);
+  };
+
+  for (const m of report?.months || []) {
+    addTotalsRow('Month', profitMonthLabel(m), m.totals).font = { bold: true };
+    for (const w of m.weeks || []) {
+      const label = `    ${w.label}${w.partial ? ' (part)' : ''} · ${w.week_start} – ${w.week_end}`;
+      addTotalsRow('Week', label, w.totals);
+      for (const d of w.days || []) addTotalsRow('Day', `        ${d.day}`, d.totals);
+    }
+  }
+  s.addRow([]);
+  addTotalsRow('TOTAL', `${report?.from || ''} to ${report?.to || ''}`, report?.totals).font = { bold: true };
+  profitStyle(s, sHeader, [10, 42, 10, 13, 18, 16, 16, 10]);
+  for (const c of [5, 6, 7]) s.getColumn(c).numFmt = PROFIT_MONEY;
+  s.getColumn(8).numFmt = PROFIT_PCT;
+
+  // ── Invoices: one row per document ─────────────────────────────────────────
+  const d = wb.addWorksheet('Invoices');
+  d.addRow(['Date', 'Week', 'Type', 'Document', 'Customer code', 'Customer', 'Rep', 'Selling (ex-VAT)', 'Cost', 'Profit', 'Margin %']);
+  for (const m of report?.months || []) {
+    for (const w of m.weeks || []) {
+      for (const day of w.days || []) {
+        for (const doc of day.documents || []) {
+          d.addRow([
+            doc.date,
+            `${w.iso_year}-W${String(w.iso_week).padStart(2, '0')}`,
+            doc.doc_type === 'credit_note' ? 'Credit note' : 'Invoice',
+            doc.doc_number,
+            doc.customer_code,
+            doc.customer_name,
+            doc.sales_rep || '',
+            num2(doc.selling), num2(doc.cost), num2(doc.profit), num2(doc.margin),
+          ]);
+        }
+      }
+    }
+  }
+  profitStyle(d, 1, [12, 8, 12, 16, 16, 38, 8, 18, 16, 16, 10]);
+  for (const c of [8, 9, 10]) d.getColumn(c).numFmt = PROFIT_MONEY;
+  d.getColumn(11).numFmt = PROFIT_PCT;
+  d.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: 11 } };
+
+  // ── Notes: the rules behind the numbers ────────────────────────────────────
+  const n = wb.addWorksheet('Notes');
+  const ex = report?.excluded || {};
+  [
+    ['Invoice Profit — how these numbers are built'],
+    [],
+    ...(report?.filter?.active
+      ? [['Filter', `${report.filter.label}. ${report.filter.matched} of ${report.filter.of_invoices} invoices match; every figure in this workbook covers those only. Credit notes are excluded from a filtered view because each one reverses a sale and so always shows a negative profit.`], []]
+      : []),
+    ['Selling', 'Sage document net excluding VAT (OEINVH.INVNETNOTX / OECRDH.CRDNETNOTX).'],
+    ['Cost', 'The cost Sage costed onto the document when it was raised (OEINVD.EXTICOST / OECRDD.EXTCCOST) — not the item master\'s current cost, so this report does not restate itself over time.'],
+    ['Profit', 'Selling less Cost. Margin % is Profit as a percentage of Selling.'],
+    ['Credit notes', 'Carried as negative selling and negative cost, so every total is a net figure.'],
+    ['Weeks', 'ISO 8601 weeks (Monday start). A week crossing a month boundary is shown under both months, marked "(part)", holding only that month\'s days — so each level sums exactly to the level above it.'],
+    [],
+    ['Excluded from every figure above'],
+    ['Inter-branch transfers', ex.reason || 'Internal stock movements between depots, not sales.'],
+    ['Documents excluded', ex.count || 0],
+    ['Selling excluded', num2(ex.selling)],
+    ['Cost excluded', num2(ex.cost)],
+  ].forEach((r) => n.addRow(r));
+  n.getRow(1).font = { bold: true };
+  n.getRow(9).font = { bold: true };
+  n.getColumn(1).width = 22;
+  n.getColumn(2).width = 110;
+  n.getColumn(2).alignment = { wrapText: true, vertical: 'top' };
+
+  return await wb.xlsx.writeBuffer();
+}
+
+// ── Invoice Profit — PDF ─────────────────────────────────────────────────────
+// The rollup, not the invoice list: a month is ~2,500 documents and nobody wants
+// that as a PDF. Month rows are bold, weeks indented beneath them, days beneath
+// those — the same shape as the screen. The per-invoice detail lives in the
+// Excel export, which is the right tool for it.
+const profitSigned = (n) => {
+  const v = Number(n) || 0;
+  const abs = Math.abs(v).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return v < 0 ? `-${abs}` : abs;
+};
+const profitPct = (n) => `${(Number(n) || 0).toFixed(2)}%`;
+
+export function buildInvoiceProfitPdf(report) {
+  const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape' });
+  const t = report?.totals || {};
+
+  doc.setFontSize(14);
+  doc.setTextColor(0);
+  doc.text('Invoice Profit', 14, 14);
+  doc.setFontSize(9);
+  doc.setTextColor(110);
+  doc.text(`${report?.site_name || ''} · ${report?.from || ''} to ${report?.to || ''} · generated ${dateOnly()}`, 14, 20);
+  doc.text(
+    `Selling ${fmtR(t.selling)} · Cost ${fmtR(t.cost)} · Profit ${profitSigned(t.profit)} · Margin ${profitPct(t.margin)}  (ex-VAT, credit notes netted off)`,
+    14, 25,
+  );
+
+  let y = 31;
+  // An active filter changes what every number below means, so it has to travel
+  // with the document — a PDF gets emailed on with no other context.
+  if (report?.filter?.active) {
+    doc.setTextColor(180, 95, 10);
+    doc.text(
+      `Filtered: ${report.filter.label} — ${report.filter.matched} of ${report.filter.of_invoices} invoices. Credit notes excluded.`,
+      14, y,
+    );
+    doc.setTextColor(110);
+    y += 6;
+  }
+
+  const body = [];
+  for (const m of report?.months || []) {
+    body.push({ level: 'month', cells: [profitMonthLabel(m), String(m.totals.invoice_count), fmtR(m.totals.selling), fmtR(m.totals.cost), profitSigned(m.totals.profit), profitPct(m.totals.margin)] });
+    for (const w of m.weeks || []) {
+      const label = `   ${w.label}${w.partial ? ' (part)' : ''}  ${w.week_start} – ${w.week_end}`;
+      body.push({ level: 'week', cells: [label, String(w.totals.invoice_count), fmtR(w.totals.selling), fmtR(w.totals.cost), profitSigned(w.totals.profit), profitPct(w.totals.margin)] });
+      for (const d of w.days || []) {
+        body.push({ level: 'day', cells: [`      ${d.day}`, String(d.totals.invoice_count), fmtR(d.totals.selling), fmtR(d.totals.cost), profitSigned(d.totals.profit), profitPct(d.totals.margin)] });
+      }
+    }
+  }
+
+  autoTable(doc, {
+    startY: y,
+    styles: { fontSize: 7.5, cellPadding: 1.3 },
+    headStyles: { fillColor: [33, 33, 33] },
+    head: [['Period', 'Invoices', 'Selling (ex-VAT)', 'Cost', 'Profit', 'Margin']],
+    body: body.map((r) => r.cells),
+    foot: [[`TOTAL · ${report?.from || ''} to ${report?.to || ''}`, String(t.invoice_count || 0), fmtR(t.selling), fmtR(t.cost), profitSigned(t.profit), profitPct(t.margin)]],
+    footStyles: { fillColor: [220, 220, 220], textColor: 0, fontStyle: 'bold' },
+    columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' } },
+    // Month rows carry the eye down a multi-page table; without the weight every
+    // row looks the same and the hierarchy is lost on paper.
+    didParseCell: (data) => {
+      if (data.section !== 'body') return;
+      const row = body[data.row.index];
+      if (row?.level === 'month') {
+        data.cell.styles.fontStyle = 'bold';
+        data.cell.styles.fillColor = [242, 242, 242];
+      }
+    },
+  });
+
+  const ex = report?.excluded;
+  if (ex?.count) {
+    doc.setFontSize(7.5);
+    doc.setTextColor(120);
+    doc.text(
+      `Excluded ${ex.count} inter-branch transfer document(s) worth ${fmtR(ex.selling)} selling / ${fmtR(ex.cost)} cost. ${ex.reason || ''}`,
+      14, Math.min(doc.lastAutoTable.finalY + 6, 200),
+    );
+  }
+
+  return Buffer.from(doc.output('arraybuffer'));
+}

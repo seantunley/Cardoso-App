@@ -25,6 +25,8 @@ import { expandDataRecord, getFirstNonEmptyObjectValue, parseJsonSafely, SALES_R
 import { analyseInvoiceCredit } from '../lib/creditAnalysis.js';
 import { getCreditLogicForAnalysis } from '../services/creditLogic.js';
 import { ageOpenItems, BUCKET_KEYS, AP_SCHEME } from '../services/aging.js';
+import { buildProfitReport, fetchDocumentLines, fetchProfitDayTotals, rollUpDays, PERIOD_TYPES } from '../services/reporting/profitReport.js';
+import { siteIdFilter } from '../lib/hubSiteScope.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -742,6 +744,356 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     } catch (err) {
       console.error('[daily-sales-documents] failed', err.message);
       res.status(503).json({ error: 'Could not load the documents for this day. Check the Sage connection and try again.' });
+    }
+  });
+
+  // ── Invoice Profit ─────────────────────────────────────────────────────────
+  // Per-invoice selling, cost and profit, nested Month → ISO Week → Day →
+  // invoice. Cost is the cost Sage costed onto the document (OEINVD.EXTICOST /
+  // OECRDD.EXTCCOST), so the report is historical and never restates itself when
+  // an item's cost changes. See src/services/reporting/profitReport.js for the
+  // full source/sign/exclusion rules.
+  //
+  // Gated by monthlyReportsGuard — the same permission that guards Daily Sales
+  // Figures and the AR document summary. This report exposes COST and MARGIN on
+  // top of those figures, so it must never sit behind the weaker reports gate.
+  const parseProfitRange = (query) => {
+    const pad = (n) => String(n).padStart(2, '0');
+    const iso = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const valid = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
+    const now = new Date();
+    return {
+      from: valid(query.from) ? query.from : iso(new Date(now.getFullYear(), now.getMonth(), 1)),
+      to: valid(query.to) ? query.to : iso(now),
+    };
+  };
+
+  // Profit/margin filters: ?losses=1, or ?min=&max= with ?unit=rand|pct.
+  // Bounds are inclusive; a blank or non-numeric bound is simply "unbounded"
+  // rather than an error, so half-typed input in the UI degrades to a wider
+  // result instead of a red box.
+  const parseProfitFilters = (query) => {
+    const bound = (v) => {
+      if (v === undefined || v === null || String(v).trim() === '') return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+    return {
+      losses: ['1', 'true', 'yes', 'on'].includes(String(query.losses || '').toLowerCase()),
+      min: bound(query.min),
+      max: bound(query.max),
+      unit: String(query.unit || 'rand').toLowerCase() === 'pct' ? 'pct' : 'rand',
+    };
+  };
+
+  // -- Hub: totals-only view ---------------------------------------------------
+  // Reads hub_invoice_profit_day (day totals the ETL pulls from each branch) and
+  // rolls them into whichever period the caller asked for - Day, Week, Month or
+  // Year. The rollup happens HERE, from the day rows, through the same
+  // rollUpDays() the branch endpoint is defined by, so hub figures and branch
+  // figures come from one implementation.
+  //
+  // No invoices on the hub by design: every branch row carries the URL and the
+  // exact date range needed to open that period in that branch's own report, so
+  // the detail has one home and cannot drift from the totals.
+  // Takes req/res, not just the query: hub_user_allowed_sites restricts which
+  // branches a user may see, and that scoping depends on WHO is asking. Cost and
+  // margin are the most confidential figures the hub holds, so the allow-list is
+  // applied to the data query AND to the branch list the filter dropdown offers
+  // — otherwise a restricted user learns the other branches' names from the
+  // filter even if the numbers are withheld.
+  const buildHubProfitTotals = (req, res) => {
+    const query = req.query || {};
+    const scope = siteIdFilter(req, res, 't.site_id');
+    const syncScope = siteIdFilter(req, res, 'w.site_id');
+    const periodType = PERIOD_TYPES.includes(String(query.period || '')) ? String(query.period) : 'month';
+    const siteFilter = String(query.site || 'all').trim();
+    // Narrowing predicate, applied to the financial rows AND to the coverage and
+    // freshness figures that describe them.
+    const where = siteFilter !== 'all' ? 'AND COALESCE(hs.name, t.site_id) = ?' : '';
+    const syncWhere = siteFilter !== 'all' ? 'AND COALESCE(hs.name, w.site_id) = ?' : '';
+    const params = siteFilter !== 'all' ? [siteFilter] : [];
+    // How far back each period type is worth showing.
+    const limits = { day: 60, week: 26, month: 24, year: 5 };
+
+    // Branch coverage comes from hub_sites, NOT from the profit table. Deriving
+    // it from the data would make a branch that has never synced simply vanish —
+    // no row, no name, no mention — while the report still calls itself "every
+    // branch" and quietly understates consolidated selling, cost and profit. That
+    // is exactly what a staggered rollout looks like: one branch still 404s on
+    // the new endpoint and nothing on screen says so.
+    const siteScope = siteIdFilter(req, res, 'id');
+    // The dropdown always offers every branch the USER may see, so narrowing to
+    // one branch does not remove the way back to the others.
+    const selectableSites = prep(`
+      SELECT id, COALESCE(name, id) AS site_name
+      FROM hub_sites
+      WHERE 1 = 1 ${siteScope.sql}
+      ORDER BY site_name`).all(...siteScope.params);
+
+    // ...but coverage describes what is actually ON SCREEN. With one branch
+    // selected, its totals must not sit under "1 of 6 branches" beside missing
+    // and stale notices about five branches this view does not include.
+    const allSites = siteFilter !== 'all'
+      ? selectableSites.filter((r) => r.site_name === siteFilter)
+      : selectableSites;
+
+    // "Has this branch reported?" comes from the SYNC WATERMARK, not from whether
+    // it has any day rows. A branch that legitimately traded nothing in the
+    // window contributes a correct zero, and inferring coverage from activity
+    // would brand it missing for ever while its sync ran perfectly.
+    const syncRows = prep(`
+      SELECT w.site_id, w.synced_at, w.day_count
+      FROM hub_invoice_profit_sync w
+      LEFT JOIN hub_sites hs ON hs.id = w.site_id
+      WHERE 1 = 1 ${syncScope.sql} ${syncWhere}`).all(...syncScope.params, ...params);
+    const reporting = new Set(syncRows.map((r) => r.site_id));
+    const syncedAtBySite = new Map(syncRows.map((r) => [r.site_id, r.synced_at]));
+
+    const sites = selectableSites.map((r) => r.site_name).filter(Boolean);
+    // Named, not counted — "2 branches missing" sends someone hunting; naming
+    // them says which sync to go and look at.
+    const missingBranches = allSites.filter((r) => !reporting.has(r.id)).map((r) => r.site_name);
+
+    const rows = prep(`
+      SELECT t.site_id, COALESCE(hs.name, t.site_id) AS site_name, hs.url AS site_url,
+             t.day, t.selling, t.cost, t.invoice_count, t.credit_note_count, t.synced_at
+      FROM hub_invoice_profit_day t
+      LEFT JOIN hub_sites hs ON hs.id = t.site_id
+      WHERE 1 = 1 ${scope.sql} ${where}
+      ORDER BY t.day`).all(...scope.params, ...params);
+
+    const margin = (profit, selling) => (selling ? (profit / selling) * 100 : 0);
+
+    // Roll each branch up separately, then merge by period, so a period row is
+    // the sum of its branch rows by construction.
+    const bySite = new Map();
+    for (const r of rows) {
+      let site = bySite.get(r.site_id);
+      if (!site) {
+        site = { site_id: r.site_id, site_name: r.site_name, site_url: r.site_url, synced_at: syncedAtBySite.get(r.site_id) || r.synced_at, days: [] };
+        bySite.set(r.site_id, site);
+      }
+      if (r.synced_at && (!site.synced_at || r.synced_at > site.synced_at)) site.synced_at = r.synced_at;
+      site.days.push(r);
+    }
+    // Branches that synced successfully but hold no days still exist for
+    // freshness purposes — otherwise a zero-trade branch can never be seen to
+    // have gone stale either.
+    for (const r of syncRows) {
+      if (!bySite.has(r.site_id)) {
+        const meta = selectableSites.find((x) => x.id === r.site_id);
+        bySite.set(r.site_id, { site_id: r.site_id, site_name: meta?.site_name || r.site_id, site_url: null, synced_at: r.synced_at, days: [] });
+      } else if (r.synced_at) {
+        const site = bySite.get(r.site_id);
+        // The watermark is authoritative: it is written on every successful
+        // pull, while a day row's stamp only moves when that day changes.
+        if (!site.synced_at || r.synced_at > site.synced_at) site.synced_at = r.synced_at;
+      }
+    }
+
+    const byPeriod = new Map();
+    for (const site of bySite.values()) {
+      for (const b of rollUpDays(site.days)[periodType] || []) {
+        let p = byPeriod.get(b.period_key);
+        if (!p) {
+          p = {
+            period_key: b.period_key, period_start: b.period_start, period_end: b.period_end,
+            selling: 0, cost: 0, profit: 0, invoice_count: 0, credit_note_count: 0, branches: [],
+          };
+          byPeriod.set(b.period_key, p);
+        }
+        p.branches.push({
+          site_id: site.site_id,
+          site_name: site.site_name,
+          // The branch's own Invoice Profit report, already scoped to this
+          // period - this IS the drill-down. Null when the hub holds no address
+          // for the branch, so the UI can say "no link" instead of rendering a
+          // dead one.
+          drill_url: site.site_url ? `${site.site_url}/Reports?report=invoice-profit&from=${b.period_start}&to=${b.period_end}` : null,
+          selling: b.selling, cost: b.cost, profit: b.profit, margin: b.margin,
+          invoice_count: b.invoice_count, credit_note_count: b.credit_note_count,
+          covered_end: b.covered_end,
+          partial: b.partial,
+          synced_at: site.synced_at,
+        });
+        p.selling += b.selling; p.cost += b.cost; p.profit += b.profit;
+        p.invoice_count += b.invoice_count; p.credit_note_count += b.credit_note_count;
+        // How far the period is covered across ALL branches — the furthest any
+        // branch has reported. Short of period_end means the period is still
+        // running (or nothing has synced since it ended).
+        if (!p.covered_end || (b.covered_end && b.covered_end > p.covered_end)) p.covered_end = b.covered_end;
+      }
+    }
+
+    const periods = [...byPeriod.values()]
+      .sort((a, b) => b.period_key.localeCompare(a.period_key))
+      .slice(0, limits[periodType])
+      .map((p) => ({
+        ...p,
+        margin: margin(p.profit, p.selling),
+        // An unfinished period must not advertise its full calendar span: the
+        // current year showing "2026-01-01 - 2026-12-31" reads as a completed
+        // annual total in August.
+        partial: !!p.covered_end && p.covered_end < p.period_end,
+        branches: p.branches.sort((a, b) => b.profit - a.profit),
+      }));
+
+    const totals = periods.reduce((acc, p) => {
+      acc.selling += p.selling; acc.cost += p.cost; acc.profit += p.profit;
+      acc.invoice_count += p.invoice_count; acc.credit_note_count += p.credit_note_count;
+      return acc;
+    }, { selling: 0, cost: 0, profit: 0, invoice_count: 0, credit_note_count: 0 });
+    totals.margin = margin(totals.profit, totals.selling);
+
+    // FRESHNESS IS PER BRANCH, and the headline figure is the OLDEST of them.
+    //
+    // Counting a branch as "reporting" because it holds any historical row, then
+    // showing the NEWEST sync time across all branches, let a branch quietly stop
+    // syncing: its stale figures kept contributing to the current period while
+    // another branch's successful sync painted a fresh timestamp over the top and
+    // no warning appeared anywhere. Reporting the oldest contributing sync can
+    // only ever understate freshness, which is the safe direction.
+    const syncTimes = [...bySite.values()].map((x) => x.synced_at).filter(Boolean).sort();
+    const newestSync = syncTimes[syncTimes.length - 1] || null;
+    const oldestSync = syncTimes[0] || null;
+    // Staleness is measured against NOW, not against the freshest branch.
+    //
+    // Comparing branches to each other only ever catches ONE branch falling
+    // behind. If the hub loses every branch at once — network down, the site
+    // endpoint broken by a release, or simply a single-branch hub — every
+    // timestamp ages together, every difference stays zero, and the warning
+    // never fires while the totals quietly rot. Absolute is the honest measure;
+    // it also subsumes the relative case, since a lone laggard is stale by the
+    // clock too.
+    //
+    // The hub ETL runs every 5 MINUTES (scheduler: hub-sync, intervalMs 5*60e3),
+    // so two hours is roughly two dozen missed cycles — loose enough to ride out
+    // a restart or a transient failure, tight enough that a real outage shows up
+    // the same morning rather than the next day.
+    const STALE_MS = 2 * 60 * 60 * 1000;
+    const nowMs = Date.now();
+    const staleBranches = [...bySite.values()]
+      .filter((x) => x.synced_at && (nowMs - Date.parse(x.synced_at)) > STALE_MS)
+      .map((x) => ({ site_name: x.site_name, synced_at: x.synced_at }));
+    return {
+      hub_mode: true,
+      period_type: periodType,
+      periods,
+      totals: periods.length ? totals : null,
+      filters: { sites, period_types: PERIOD_TYPES },
+      // Deliberately the oldest, not the newest — see above.
+      last_synced_at: oldestSync,
+      newest_synced_at: newestSync,
+      stale_branches: staleBranches,
+      // Coverage, stated rather than implied. branches_expected counts the
+      // branches this user may see; missing_branches are the ones contributing
+      // nothing to the figures above.
+      branches_expected: allSites.length,
+      branches_reporting: reporting.size,
+      missing_branches: missingBranches,
+      site_filter: siteFilter === 'all' ? null : siteFilter,
+      // An empty rollup means the ETL has not run, NOT that nothing was sold -
+      // say which, rather than showing a convincing R0.
+      empty_reason: periods.length
+        ? null
+        : (allSites.length
+          ? `No branch profit totals have reached the hub yet${missingBranches.length ? ` (waiting on ${missingBranches.join(', ')})` : ''}. They arrive with the site sync - check Hub > Sync Log if this persists.`
+          : 'No branches are registered on this hub yet.'),
+    };
+  };
+
+  // Shared by the JSON route and the Excel export so the workbook can never
+  // drift from what's on screen.
+  const loadProfitReport = async (query) => {
+    const { from, to } = parseProfitRange(query);
+    const pool = await getSagePool();
+    const report = await buildProfitReport({ pool, from, to, filters: parseProfitFilters(query) });
+    const depotRow = prep('SELECT name FROM depot_profile WHERE id = 1').get();
+    return { ...report, site_name: (depotRow?.name || '').trim() || SITE_NAME };
+  };
+
+  router.get('/api/reports/invoice-profit', ...monthlyReportsGuard, async (req, res) => {
+    const { from, to } = parseProfitRange(req.query);
+    try {
+      if (process.env.HUB_MODE === 'true') {
+        // Hub: totals-only, served from the hub_invoice_profit_totals rollup the
+        // ETL pulls from each branch. Per-invoice detail stays at the branch that
+        // raised it — the hub hands back a link instead of a copy.
+        return res.json(buildHubProfitTotals(req, res));
+      }
+      return res.json(await loadProfitReport(req.query));
+    } catch (err) {
+      console.error(`[invoice-profit] failed to build the profit report for ${from} → ${to}:`, err.message);
+      try { logError('reporting.invoice-profit', err, { from, to }); } catch { /* logError is best-effort; the 503 below is what the operator sees */ }
+      return res.status(503).json({
+        error: `Could not build the Invoice Profit report for ${from} to ${to}. The report reads invoice cost live from Sage (OEINVH/OEINVD) — check that the Sage connection is up in Settings → Connections, then try again. Cause: ${err.message}`,
+      });
+    }
+  });
+
+  // GET /api/reports/invoice-profit/document?type=invoice|credit_note&uniq=<id>
+  // The stock lines behind one document — the drill-down under an invoice row.
+  // Fetched on demand rather than shipped with the report: a month is ~2,500
+  // documents and tens of thousands of lines, and almost none of them get opened.
+  router.get('/api/reports/invoice-profit/document', ...monthlyReportsGuard, async (req, res) => {
+    const type = String(req.query.type || 'invoice');
+    const uniq = String(req.query.uniq || '');
+    try {
+      if (process.env.HUB_MODE === 'true') {
+        return res.status(409).json({ error: 'Invoice detail is not available on the hub — open the report on a branch (site) install.' });
+      }
+      const pool = await getSagePool();
+      return res.json(await fetchDocumentLines({ pool, type, uniq }));
+    } catch (err) {
+      console.error(`[invoice-profit] failed to load the lines for ${type} ${uniq}:`, err.message);
+      try { logError('reporting.invoice-profit.document', err, { type, uniq }); } catch { /* best-effort */ }
+      return res.status(503).json({
+        error: `Could not load the lines for this document. The detail is read live from Sage (OEINVD/OECRDD) — check the Sage connection in Settings → Connections and try again. Cause: ${err.message}`,
+      });
+    }
+  });
+
+  // GET /api/reports/invoice-profit/export.pdf — server-built PDF, matching the
+  // Aged Debtors / Rep Exposure exports. Same report object as the screen and
+  // the Excel workbook, so all three always agree.
+  router.get('/api/reports/invoice-profit/export.pdf', ...monthlyReportsGuard, async (req, res) => {
+    const { from, to } = parseProfitRange(req.query);
+    try {
+      if (process.env.HUB_MODE === 'true') {
+        return res.status(409).json({ error: 'Invoice profit is not available on the hub yet — export it from a branch (site) install.' });
+      }
+      const report = await loadProfitReport(req.query);
+      const { buildInvoiceProfitPdf } = await import('../services/reporting/reportExports.js');
+      const buf = buildInvoiceProfitPdf(report);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="invoice-profit-${from}-to-${to}.pdf"`);
+      return res.send(buf);
+    } catch (err) {
+      console.error(`[invoice-profit] failed to export the profit PDF for ${from} → ${to}:`, err.message);
+      try { logError('reporting.invoice-profit.pdf', err, { from, to }); } catch { /* best-effort */ }
+      return res.status(500).json({ error: `Could not export the Invoice Profit PDF for ${from} to ${to}. Cause: ${err.message}` });
+    }
+  });
+
+  router.get('/api/reports/invoice-profit/export', ...monthlyReportsGuard, async (req, res) => {
+    const { from, to } = parseProfitRange(req.query);
+    try {
+      if (process.env.HUB_MODE === 'true') {
+        return res.status(409).json({ error: 'Invoice profit is not available on the hub yet — export it from a branch (site) install.' });
+      }
+      const report = await loadProfitReport(req.query);
+      const { buildInvoiceProfitXlsx } = await import('../services/reporting/reportExports.js');
+      const buf = await buildInvoiceProfitXlsx(report);
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="invoice-profit-${from}-to-${to}.xlsx"`);
+      return res.send(buf);
+    } catch (err) {
+      console.error(`[invoice-profit] failed to export the profit workbook for ${from} → ${to}:`, err.message);
+      try { logError('reporting.invoice-profit.export', err, { from, to }); } catch { /* best-effort */ }
+      return res.status(500).json({
+        error: `Could not export the Invoice Profit workbook for ${from} to ${to}. Cause: ${err.message}`,
+      });
     }
   });
 
@@ -3059,6 +3411,35 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     } catch (err) {
       console.error('[reporting.ar-document-summary] Sage query failed', err.message);
       res.status(503).json({ error: 'Sage query failed' });
+    }
+  });
+
+  // GET /api/reporting/invoice-profit-totals?from=&to= - the hub pulls this from
+  // each branch (hubEtl) to populate hub_invoice_profit_day.
+  //
+  // DAY TOTALS ONLY: no invoices, and no week/month/year either - the hub derives
+  // those from the days, so a rollup can never disagree with the days beneath it.
+  // Aggregated in SQL (4 grouped queries, ~830 rows for two years) rather than by
+  // pulling ~45,000 documents through JS, which timed out on a cold branch.
+  //
+  // The window is caller-controlled so the ETL can run incrementally: a trailing
+  // re-pull each night, not a full two-year scan. Floored at ~2.5 years so a bad
+  // parameter cannot ask a branch for its entire history.
+  router.get('/api/reporting/invoice-profit-totals', reportingRateLimiter, requireReportingToken, async (req, res) => {
+    const pad2 = (n) => String(n).padStart(2, '0');
+    const now = new Date();
+    const isDate = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
+    const to = isDate(req.query.to) ? req.query.to : `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+    let from = isDate(req.query.from) ? req.query.from : `${now.getFullYear() - 1}-01-01`;
+    const floor = new Date(Date.parse(`${to}T00:00:00Z`) - 900 * 86400000).toISOString().slice(0, 10);
+    if (from < floor) from = floor;
+    try {
+      const pool = await getSagePool();
+      const days = await fetchProfitDayTotals({ pool, from, to });
+      res.json({ from, to, days });
+    } catch (err) {
+      console.error(`[reporting.invoice-profit-totals] failed for ${from} to ${to}:`, err.message);
+      res.status(503).json({ error: `Invoice profit day totals unavailable for ${from} to ${to}: ${err.message}` });
     }
   });
 

@@ -596,6 +596,82 @@ async function syncSite(site) {
       console.warn(`[HUB] AR document summary sync failed for ${site.slug || site.id}: ${e.message}`);
     }
 
+    // Invoice profit day totals (per-branch profit by day) — INCREMENTAL.
+    //
+    // The branch aggregates in SQL and returns one row per trading day, so even a
+    // two-year backfill is ~600 rows. We still pull incrementally, because a cold
+    // branch reading two years of OE invoice + credit-note lines out of Sage took
+    // 85 seconds on first run and under a second once warm.
+    //
+    // Each run re-pulls a trailing 30-day window from the newest day we already
+    // hold (or backfills from Jan of last year if we hold nothing). The trailing
+    // window matters: invoices get posted late, so yesterday's total is not final
+    // and the last few weeks have to be allowed to move. Days outside the window
+    // are left alone, which is why this deletes by RANGE rather than by site.
+    //
+    // Week, month and year are NOT stored — the hub derives them from these day
+    // rows when it renders, so a rollup can never disagree with its own days.
+    try {
+      const isoToday = new Date().toISOString().slice(0, 10);
+      const newest = db.prepare('SELECT MAX(day) AS d FROM hub_invoice_profit_day WHERE site_id = ?').get(site.id)?.d;
+      const from = newest
+        ? new Date(Date.parse(`${newest}T00:00:00Z`) - 30 * 86400000).toISOString().slice(0, 10)
+        : `${new Date().getFullYear() - 1}-01-01`;
+
+      const ctrlPr = new AbortController();
+      // 180s, not the 20s the AR summary uses: a first-run backfill on a cold
+      // branch is slow, and a timeout here costs a whole day of totals. Later
+      // runs return in under a second.
+      const tPr = setTimeout(() => ctrlPr.abort(), 180000);
+      let prData;
+      try {
+        const url = `${site.url}/api/reporting/invoice-profit-totals?from=${from}&to=${isoToday}`;
+        const prRes = await fetch(url, { headers, signal: ctrlPr.signal });
+        if (!prRes.ok) throw new Error(`HTTP ${prRes.status}`);
+        prData = await prRes.json();
+      } finally { clearTimeout(tPr); }
+
+      const days = Array.isArray(prData?.days) ? prData.days : [];
+      const upsertDay = db.prepare(`
+        INSERT OR REPLACE INTO hub_invoice_profit_day
+          (site_id, day, selling, cost, profit, invoice_count, credit_note_count, synced_at)
+        VALUES (@site_id, @day, @selling, @cost, @profit, @invoice_count, @credit_note_count, @synced_at)`);
+      db.transaction(() => {
+        // Clear only the window we just re-read, so a day that legitimately
+        // dropped to nothing is removed rather than left frozen at its old value,
+        // while history outside the window survives.
+        db.prepare('DELETE FROM hub_invoice_profit_day WHERE site_id = ? AND day >= ? AND day <= ?')
+          .run(site.id, prData?.from || from, prData?.to || isoToday);
+        const now = new Date().toISOString();
+        // Written whether or not any days came back: a branch that legitimately
+        // traded nothing in the window has synced successfully and must not be
+        // reported as missing.
+        db.prepare(`
+          INSERT OR REPLACE INTO hub_invoice_profit_sync (site_id, synced_at, window_from, window_to, day_count)
+          VALUES (?, ?, ?, ?, ?)`).run(site.id, now, prData?.from || from, prData?.to || isoToday, days.length);
+        for (const d of days) {
+          if (!d?.day) continue;
+          upsertDay.run({
+            site_id: site.id,
+            day: String(d.day),
+            selling: Number(d.selling) || 0,
+            cost: Number(d.cost) || 0,
+            profit: Number(d.profit) || 0,
+            invoice_count: Number(d.invoice_count) || 0,
+            credit_note_count: Number(d.credit_note_count) || 0,
+            synced_at: now,
+          });
+        }
+      })();
+    } catch (e) {
+      // Through recordStageFailure, not a bare console.warn: the footer decides
+      // status='partial' from stageErrors, so a warn-only catch recorded the run
+      // as 'ok'. The report's own empty state tells operators to check
+      // Hub -> Sync Log when totals are missing — that instruction has to lead
+      // somewhere true.
+      recordStageFailure('Invoice profit totals', e);
+    }
+
     // Inventory movement (sales velocity cache) — paginated fetch using
     // the same pattern as the inventory sync above. Each page is 1000
     // rows with a 10s timeout; large sites with many SKUs × months no

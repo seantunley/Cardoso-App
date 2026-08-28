@@ -1388,6 +1388,11 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       db.prepare('DELETE FROM hub_sync_log').run();
       db.prepare('DELETE FROM hub_records').run();
       db.prepare('DELETE FROM hub_inventory').run();
+      // Profit day totals are pulled INCREMENTALLY: the ETL resumes from the
+      // newest day it already holds. Leaving them here would make a "full
+      // re-pull" start 30 days back and quietly keep the very rows the operator
+      // pressed this button to replace.
+      try { db.prepare('DELETE FROM hub_invoice_profit_day').run(); } catch { /* table may pre-date the v110 migration */ }
       logAudit({
         req, action: 'hub_force_resync_all', resourceType: 'system',
         resourceName: 'All hub sites',
@@ -1419,6 +1424,9 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       db.prepare("DELETE FROM hub_sync_log WHERE site_id = ?").run(siteId);
       db.prepare("DELETE FROM hub_records WHERE site_id = ?").run(siteId);
       db.prepare("DELETE FROM hub_inventory WHERE site_id = ?").run(siteId);
+      // See the all-sites route: the profit stage resumes from its newest stored
+      // day, so it has to be cleared for a force-resync to actually re-pull.
+      try { db.prepare("DELETE FROM hub_invoice_profit_day WHERE site_id = ?").run(siteId); } catch { /* table may pre-date the v110 migration */ }
       const site = db.prepare('SELECT slug, name FROM hub_sites WHERE id = ?').get(siteId);
       logAudit({
         req, action: 'hub_force_resync_site', resourceType: 'system',
@@ -1495,6 +1503,11 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         // to x.site_id when the hub_sites row is gone, so leftover rows would
         // resurface as stale site-id data after the site is forgotten.
         try { counts.bat_exceptions = db.prepare(`DELETE FROM hub_bat_exceptions WHERE site_id = ?`).run(siteId).changes; } catch { counts.bat_exceptions = 0; }
+        // Same reasoning as hub_bat_exceptions: the Invoice Profit hub view
+        // falls back to the raw site_id when the hub_sites row is gone, so
+        // leftover day rows would keep this branch's selling, cost and margin in
+        // the consolidated totals after the UI said it was removed.
+        try { counts.invoice_profit_day = db.prepare(`DELETE FROM hub_invoice_profit_day WHERE site_id = ?`).run(siteId).changes; } catch { counts.invoice_profit_day = 0; }
         counts.site = db.prepare(`DELETE FROM hub_sites WHERE id = ?`).run(siteId).changes;
       });
       tx();
@@ -1502,7 +1515,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       logAudit({
         req, action: 'hub_forget_orphan_site', resourceType: 'system',
         resourceId: siteId, resourceName: row.name || row.slug || siteId,
-        details: `Forgot orphan site — removed ${counts.site} hub_sites row, ${counts.records} hub_records, ${counts.inventory} hub_inventory, ${counts.sync_log} hub_sync_log, ${counts.backup_integrity} hub_backup_integrity, ${counts.bat_summary} hub_bat_summary, ${counts.bat_exceptions} hub_bat_exceptions`,
+        details: `Forgot orphan site — removed ${counts.site} hub_sites row, ${counts.records} hub_records, ${counts.inventory} hub_inventory, ${counts.sync_log} hub_sync_log, ${counts.backup_integrity} hub_backup_integrity, ${counts.bat_summary} hub_bat_summary, ${counts.bat_exceptions} hub_bat_exceptions, ${counts.invoice_profit_day} hub_invoice_profit_day`,
         changes: { counts },
       });
 
@@ -1526,6 +1539,10 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       // Keyed by site_id; the weekly report falls back to x.site_id when the
       // hub_sites row is gone, so leftover rows would resurface as stale data.
       try { db.prepare('DELETE FROM hub_bat_exceptions WHERE site_id = ?').run(siteId); } catch { /* table may pre-date the v105 migration */ }
+      // Profit day totals are keyed by site_id and the hub view falls back to
+      // the raw id, so orphaned rows would keep showing this branch's cost and
+      // margin in consolidated totals after removal.
+      try { db.prepare('DELETE FROM hub_invoice_profit_day WHERE site_id = ?').run(siteId); } catch { /* table may pre-date the v110 migration */ }
       db.prepare('DELETE FROM hub_sites WHERE id = ?').run(siteId);
 
       logAudit({
