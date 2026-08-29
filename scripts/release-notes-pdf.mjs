@@ -1625,6 +1625,71 @@ const RELEASES = {
   ],
   },
 
+  '2026-08-28': {
+    product: 'Cardoso App',
+    title: 'Product Update',
+    date: '28 Aug 2026',
+    slug: '28-Aug-2026',
+    intro:
+      "This update introduces the Invoice Profit report — a new view of your " +
+      "trading performance that shows the cost price, selling price, and gross " +
+      "profit on every invoice, grouped by day, week, or month. Drill into any " +
+      "period to see the contributing invoices line by line, export the result " +
+      "as a PDF, and — at head office — compare profitability across branches " +
+      "in a single view. Every figure is drawn from, and reconciles to, Sage.",
+    sections: [
+      {
+        label: 'NEW',
+        heading: 'New Features',
+        items: [
+          {
+            title: 'Invoice Profit report',
+            body:
+              "A new report shows the cost price, selling price, and gross profit " +
+              "for every invoice, grouped into daily, weekly, or monthly periods. " +
+              "Spot your most and least profitable trading periods at a glance, " +
+              "and drill into any row to see the individual invoices behind the figures.",
+          },
+          {
+            title: 'Invoice line drill-down with PDF export',
+            body:
+              "Open any period in the Invoice Profit report to see the individual " +
+              "invoices and their line-level cost and profit detail. Export the " +
+              "current view as a PDF for filing or sharing.",
+          },
+          {
+            title: 'Invoice Profit at head office — branch comparison',
+            body:
+              "Head-office users can view Invoice Profit across all branches in " +
+              "one screen, with Day, Week, Month, and Year totals and a branch " +
+              "drill-down to compare profitability site by site.",
+          },
+        ],
+      },
+      {
+        label: 'IMPROVED',
+        heading: 'Improvements',
+        items: [
+          {
+            title: 'Profit summary strip and shareable filters',
+            body:
+              "The Invoice Profit report opens with a summary strip showing total " +
+              "cost, revenue, and gross profit for the period in view. Filters " +
+              "narrow the report by date range and grouping, and the selection is " +
+              "encoded in the page link so a view can be bookmarked or shared.",
+          },
+          {
+            title: 'Data-freshness indicator',
+            body:
+              "The report shows when its data was last synced from Sage, with a " +
+              "clear warning when figures may be out of date, so you always know " +
+              "how current the numbers are.",
+          },
+        ],
+      },
+    ],
+  },
+
   '2026-08-27': {
     product: 'Cardoso App',
     title: 'Product Update',
