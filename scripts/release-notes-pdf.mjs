@@ -1672,22 +1672,24 @@ const RELEASES = {
         heading: 'Improvements',
         items: [
           {
-            title: 'Profit summary strip and filters',
+            title: 'Branch: profit summary strip and filters',
             body:
-              "The Invoice Profit report opens with a summary strip showing total " +
-              "cost, revenue, and gross profit for the period in view. On a branch, " +
-              "a date-range picker and profit filters let you narrow the figures, " +
-              "with the selection encoded in the page link for bookmarking and " +
-              "sharing. At head office, a period selector switches between Day, " +
-              "Week, Month, and Year groupings, and a branch selector narrows to " +
-              "a single site.",
+              "On a branch, the Invoice Profit report opens with a summary strip " +
+              "showing total cost, revenue, and gross profit for the period in " +
+              "view, with cards for day-to-date, week-to-date, and month-to-date " +
+              "figures. A date-range picker and profit filters let you narrow the " +
+              "figures, and the selection is encoded in the page link for " +
+              "bookmarking and sharing. At head office, a period selector switches " +
+              "between Day, Week, Month, and Year groupings, and a branch selector " +
+              "narrows the view to a single site.",
           },
           {
-            title: 'Data-freshness indicator',
+            title: 'Hub: branch sync freshness',
             body:
-              "The report shows when its data was last synced from Sage, with a " +
-              "clear warning when figures may be out of date, so you always know " +
-              "how current the numbers are.",
+              "At head office, the Invoice Profit page shows when each branch's " +
+              "figures were last synchronised to the hub, with a warning when a " +
+              "branch is overdue, so you always know how current the consolidated " +
+              "view is.",
           },
         ],
       },

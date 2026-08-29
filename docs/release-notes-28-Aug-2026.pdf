@@ -10,7 +10,7 @@
 endobj
 4 0 obj
 <<
-/Length 6719
+/Length 6871
 >>
 stream
 0.5670000000000001 w
@@ -175,36 +175,38 @@ BT
 12.0749999999999993 TL
 0.129 0.145 0.161 rg
 62.3622047244094517 389.1970866141732017 Td
-(Profit summary strip and filters) Tj
+(Branch: profit summary strip and filters) Tj
 ET
 BT
 /F1 9.5 Tf
 10.9249999999999989 TL
 0.353 0.392 0.451 rg
 62.3622047244094517 375.0238582677164914 Td
-(The Invoice Profit report opens with a summary strip showing total cost, revenue, and gross) Tj
-T* (profit for the period in view. On a branch, a date-range picker and profit filters let you narrow the) Tj
-T* (figures, with the selection encoded in the page link for bookmarking and sharing. At head office,) Tj
-T* (a period selector switches between Day, Week, Month, and Year groupings, and a branch) Tj
-T* (selector narrows to a single site.) Tj
+(On a branch, the Invoice Profit report opens with a summary strip showing total cost, revenue,) Tj
+T* (and gross profit for the period in view, with cards for day-to-date, week-to-date, and) Tj
+T* (month-to-date figures. A date-range picker and profit filters let you narrow the figures, and the) Tj
+T* (selection is encoded in the page link for bookmarking and sharing. At head office, a period) Tj
+T* (selector switches between Day, Week, Month, and Year groupings, and a branch selector) Tj
+T* (narrows the view to a single site.) Tj
 ET
 0.15 0.39 0.64 rg
-51.0236220472441033 302.7403937007873651 3.9685039370078741 -3.9685039370078741 re
+51.0236220472441033 289.1340944881889072 3.9685039370078741 -3.9685039370078741 re
 f
 BT
 /F2 10.5 Tf
 12.0749999999999993 TL
 0.129 0.145 0.161 rg
-62.3622047244094517 294.2364566929132934 Td
-(Data-freshness indicator) Tj
+62.3622047244094517 280.6301574803148924 Td
+(Hub: branch sync freshness) Tj
 ET
 BT
 /F1 9.5 Tf
 10.9249999999999989 TL
 0.353 0.392 0.451 rg
-62.3622047244094517 280.0632283464566399 Td
-(The report shows when its data was last synced from Sage, with a clear warning when figures) Tj
-T* (may be out of date, so you always know how current the numbers are.) Tj
+62.3622047244094517 266.4569291338582389 Td
+(At head office, the Invoice Profit page shows when each branch's figures were last synchronised) Tj
+T* (to the hub, with a warning when a branch is overdue, so you always know how current the) Tj
+T* (consolidated view is.) Tj
 ET
 0.87 0.89 0.91 RG
 0.8503937007874016 w
@@ -397,7 +399,7 @@ endobj
 19 0 obj
 <<
 /Producer (jsPDF 4.2.1)
-/CreationDate (D:20260829061410-00'00')
+/CreationDate (D:20260829061747-00'00')
 >>
 endobj
 20 0 obj
@@ -411,33 +413,33 @@ endobj
 xref
 0 21
 0000000000 65535 f 
-0000006923 00000 n 
-0000008740 00000 n 
+0000007075 00000 n 
+0000008892 00000 n 
 0000000015 00000 n 
 0000000152 00000 n 
-0000006980 00000 n 
-0000007105 00000 n 
-0000007235 00000 n 
-0000007368 00000 n 
-0000007505 00000 n 
-0000007628 00000 n 
-0000007757 00000 n 
-0000007889 00000 n 
-0000008025 00000 n 
-0000008153 00000 n 
-0000008280 00000 n 
-0000008409 00000 n 
-0000008542 00000 n 
-0000008644 00000 n 
-0000008988 00000 n 
-0000009074 00000 n 
+0000007132 00000 n 
+0000007257 00000 n 
+0000007387 00000 n 
+0000007520 00000 n 
+0000007657 00000 n 
+0000007780 00000 n 
+0000007909 00000 n 
+0000008041 00000 n 
+0000008177 00000 n 
+0000008305 00000 n 
+0000008432 00000 n 
+0000008561 00000 n 
+0000008694 00000 n 
+0000008796 00000 n 
+0000009140 00000 n 
+0000009226 00000 n 
 trailer
 <<
 /Size 21
 /Root 20 0 R
 /Info 19 0 R
-/ID [ <9E01BC7FAD327A3C8BD05E464BA09A09> <9E01BC7FAD327A3C8BD05E464BA09A09> ]
+/ID [ <66516C3A9AFEDCFD0BBE9FDA1D4682E0> <66516C3A9AFEDCFD0BBE9FDA1D4682E0> ]
 >>
 startxref
-9178
+9330
 %%EOF
