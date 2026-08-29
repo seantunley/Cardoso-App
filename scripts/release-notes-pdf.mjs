@@ -1651,12 +1651,13 @@ const RELEASES = {
               "and drill into any row to see the individual invoices behind the figures.",
           },
           {
-            title: 'Invoice line drill-down and export',
+            title: 'Invoice line drill-down and export (branch)',
             body:
-              "Open any period in the Invoice Profit report to see the individual " +
-              "invoices behind the figure. Export the full date range as a formatted " +
-              "PDF summary (month, week, and day totals) for filing or sharing; " +
-              "detailed per-invoice data is available as an Excel workbook.",
+              "On a branch, open any period in the Invoice Profit report to see the " +
+              "individual invoices behind the figure. Export the full date range as a " +
+              "formatted PDF summary (month, week, and day totals) for filing or " +
+              "sharing; detailed per-invoice data is available as an Excel workbook. " +
+              "Both exports are available on branch installs only.",
           },
           {
             title: 'Invoice Profit at head office — branch comparison',
@@ -1684,12 +1685,13 @@ const RELEASES = {
               "narrows the view to a single site.",
           },
           {
-            title: 'Hub: branch sync freshness',
+            title: 'Hub: sync freshness indicator',
             body:
-              "At head office, the Invoice Profit page shows when each branch's " +
-              "figures were last synchronised to the hub, with a warning when a " +
-              "branch is overdue, so you always know how current the consolidated " +
-              "view is.",
+              "At head office, the Invoice Profit page shows the oldest branch-to-" +
+              "hub sync time as a headline so you can tell at a glance how current " +
+              "the consolidated figures are. When one or more branches have not " +
+              "synced in over two hours, those branches are named individually with " +
+              "their last sync time.",
           },
         ],
       },
