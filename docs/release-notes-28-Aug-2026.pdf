@@ -10,7 +10,7 @@
 endobj
 4 0 obj
 <<
-/Length 7051
+/Length 7152
 >>
 stream
 0.5670000000000001 w
@@ -183,28 +183,29 @@ BT
 10.9249999999999989 TL
 0.353 0.392 0.451 rg
 62.3622047244094517 361.4175590551181472 Td
-(On a branch, the Invoice Profit report opens with a summary strip showing total cost, revenue,) Tj
-T* (and gross profit for the period in view, with cards for day-to-date, week-to-date, and) Tj
-T* (month-to-date figures. A date-range picker and profit filters let you narrow the figures, and the) Tj
+(On a branch, the Invoice Profit report opens with a summary strip that adapts to the selected) Tj
+T* (date range. For a single-month view the strip shows day-to-date, week-to-date, month-to-date,) Tj
+T* (and range total; across multiple months it shows range total, best month, weakest month, and) Tj
+T* (monthly average. A date-range picker and profit filters let you narrow the figures, and the) Tj
 T* (selection is encoded in the page link for bookmarking and sharing. At head office, a period) Tj
 T* (selector switches between Day, Week, Month, and Year groupings, and a branch selector) Tj
 T* (narrows the view to a single site.) Tj
 ET
 0.15 0.39 0.64 rg
-51.0236220472441033 275.5277952755906199 3.9685039370078741 -3.9685039370078741 re
+51.0236220472441033 261.921496062992162 3.9685039370078741 -3.9685039370078741 re
 f
 BT
 /F2 10.5 Tf
 12.0749999999999993 TL
 0.129 0.145 0.161 rg
-62.3622047244094517 267.023858267716605 Td
+62.3622047244094517 253.4175590551180903 Td
 (Hub: sync freshness indicator) Tj
 ET
 BT
 /F1 9.5 Tf
 10.9249999999999989 TL
 0.353 0.392 0.451 rg
-62.3622047244094517 252.8506299212599515 Td
+62.3622047244094517 239.2443307086614368 Td
 (At head office, the Invoice Profit page shows the oldest branch-to-hub sync time as a headline) Tj
 T* (so you can tell at a glance how current the consolidated figures are. When one or more) Tj
 T* (branches have not synced in over two hours, those branches are named individually with their) Tj
@@ -401,7 +402,7 @@ endobj
 19 0 obj
 <<
 /Producer (jsPDF 4.2.1)
-/CreationDate (D:20260829062044-00'00')
+/CreationDate (D:20260829062330-00'00')
 >>
 endobj
 20 0 obj
@@ -415,33 +416,33 @@ endobj
 xref
 0 21
 0000000000 65535 f 
-0000007255 00000 n 
-0000009072 00000 n 
+0000007356 00000 n 
+0000009173 00000 n 
 0000000015 00000 n 
 0000000152 00000 n 
-0000007312 00000 n 
-0000007437 00000 n 
-0000007567 00000 n 
-0000007700 00000 n 
-0000007837 00000 n 
-0000007960 00000 n 
-0000008089 00000 n 
-0000008221 00000 n 
-0000008357 00000 n 
-0000008485 00000 n 
-0000008612 00000 n 
-0000008741 00000 n 
-0000008874 00000 n 
-0000008976 00000 n 
-0000009320 00000 n 
-0000009406 00000 n 
+0000007413 00000 n 
+0000007538 00000 n 
+0000007668 00000 n 
+0000007801 00000 n 
+0000007938 00000 n 
+0000008061 00000 n 
+0000008190 00000 n 
+0000008322 00000 n 
+0000008458 00000 n 
+0000008586 00000 n 
+0000008713 00000 n 
+0000008842 00000 n 
+0000008975 00000 n 
+0000009077 00000 n 
+0000009421 00000 n 
+0000009507 00000 n 
 trailer
 <<
 /Size 21
 /Root 20 0 R
 /Info 19 0 R
-/ID [ <4344CD229FCC44227CD103A88A8FFA85> <4344CD229FCC44227CD103A88A8FFA85> ]
+/ID [ <B9D35E402A8381ACD98DADFE94644D50> <B9D35E402A8381ACD98DADFE94644D50> ]
 >>
 startxref
-9510
+9611
 %%EOF
