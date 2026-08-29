@@ -1651,11 +1651,12 @@ const RELEASES = {
               "and drill into any row to see the individual invoices behind the figures.",
           },
           {
-            title: 'Invoice line drill-down with PDF export',
+            title: 'Invoice line drill-down and export',
             body:
               "Open any period in the Invoice Profit report to see the individual " +
-              "invoices and their line-level cost and profit detail. Export the " +
-              "current view as a PDF for filing or sharing.",
+              "invoices behind the figure. Export the full date range as a formatted " +
+              "PDF summary (month, week, and day totals) for filing or sharing; " +
+              "detailed per-invoice data is available as an Excel workbook.",
           },
           {
             title: 'Invoice Profit at head office — branch comparison',
@@ -1671,12 +1672,15 @@ const RELEASES = {
         heading: 'Improvements',
         items: [
           {
-            title: 'Profit summary strip and shareable filters',
+            title: 'Profit summary strip and filters',
             body:
               "The Invoice Profit report opens with a summary strip showing total " +
-              "cost, revenue, and gross profit for the period in view. Filters " +
-              "narrow the report by date range and grouping, and the selection is " +
-              "encoded in the page link so a view can be bookmarked or shared.",
+              "cost, revenue, and gross profit for the period in view. On a branch, " +
+              "a date-range picker and profit filters let you narrow the figures, " +
+              "with the selection encoded in the page link for bookmarking and " +
+              "sharing. At head office, a period selector switches between Day, " +
+              "Week, Month, and Year groupings, and a branch selector narrows to " +
+              "a single site.",
           },
           {
             title: 'Data-freshness indicator',
