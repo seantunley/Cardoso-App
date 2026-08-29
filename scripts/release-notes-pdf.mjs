@@ -1633,10 +1633,12 @@ const RELEASES = {
     intro:
       "This update introduces the Invoice Profit report — a new view of your " +
       "trading performance that shows the cost price, selling price, and gross " +
-      "profit on every invoice, grouped by day, week, or month. Drill into any " +
-      "period to see the contributing invoices line by line, export the result " +
-      "as a PDF, and — at head office — compare profitability across branches " +
-      "in a single view. Every figure is drawn from, and reconciles to, Sage.",
+      "profit on customer invoices (inter-branch depot transfers excluded), " +
+      "grouped by day, week, or month. Drill into any period to see the " +
+      "contributing invoices line by line. On a branch, export a PDF summary " +
+      "or a detailed Excel workbook. At head office, compare profitability " +
+      "across branches in a single view. Every figure is drawn from, and " +
+      "reconciles to, Sage.",
     sections: [
       {
         label: 'NEW',
