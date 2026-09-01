@@ -16,6 +16,34 @@ import { recomputeReconTotals } from '../services/bat/reconTotals.js';
 
 const require = createRequire(import.meta.url);
 
+// Pull the site address out of a generated Caddyfile.
+//
+// The site block opener is written by scripts/install-hub-caddy.ps1 as
+// `${Hostname}$(if ($ListenPort -ne 443) { ":$ListenPort" }) {`, so on a
+// hub using a non-default TLS port the line reads:
+//
+//     cardoso-headoffice.buffalo-salak.ts.net:8443 {
+//
+// An earlier version of this parser required the `{` to follow the
+// hostname directly, so every hub installed with -ListenPort (needed on
+// boxes where IIS / the Sage 300 Web API already own :443 via an HTTP.sys
+// reservation) reported hostname=null. That cascaded: the cert section
+// claimed "No cert found" without ever looking, and the Renew cert button
+// greyed out — on exactly the hubs whose certs nobody could renew from the
+// UI. Tolerate an optional scheme, an optional :port, and leading space.
+export function parseCaddyfileSite(text) {
+  const hostMatch = text.match(
+    /^[ \t]*(?:https?:\/\/)?([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.ts\.net)(?::(\d+))?[^\n{]*\{/m
+  );
+  const backendMatch = text.match(/reverse_proxy\s+http:\/\/127\.0\.0\.1:(\d+)/);
+  return {
+    hostname: hostMatch ? hostMatch[1] : null,
+    // Absent :port means Caddy is on the default TLS port.
+    listen_port: hostMatch ? (hostMatch[2] ? parseInt(hostMatch[2], 10) : 443) : null,
+    backend_port: backendMatch ? parseInt(backendMatch[1], 10) : null,
+  };
+}
+
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 const GITHUB_RELEASES_API = 'https://api.github.com/repos/seantunley/Cardoso-App/releases/latest';
 const RELEASE_ASSET_HOSTS = new Set(['github.com', 'objects.githubusercontent.com', 'github-releases.githubusercontent.com']);
@@ -869,13 +897,9 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
       const caddyfilePath = path.join(caddyDir, 'Caddyfile');
       if (fs.existsSync(caddyfilePath)) {
         const text = fs.readFileSync(caddyfilePath, 'utf8');
-        // Hostname is the first non-comment block opener
-        const hostMatch = text.match(/^([A-Za-z0-9.-]+\.ts\.net)\s*\{/m);
-        const backendMatch = text.match(/reverse_proxy\s+http:\/\/127\.0\.0\.1:(\d+)/);
         status.caddyfile = {
           path: caddyfilePath,
-          hostname: hostMatch ? hostMatch[1] : null,
-          backend_port: backendMatch ? parseInt(backendMatch[1], 10) : null,
+          ...parseCaddyfileSite(text),
         };
       }
     } catch { /* unparseable Caddyfile — leave null */ }
@@ -883,7 +907,13 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
     // Cert inspection — read the .crt file and pull notBefore/notAfter
     // out via Node's X509Certificate. Doesn't touch the .key file.
     try {
-      if (status.caddyfile?.hostname) {
+      if (!status.caddyfile?.hostname) {
+        // Don't claim the cert is missing when we never looked for it —
+        // without a hostname we can't even build the path. Say so.
+        status.cert = status.caddyfile
+          ? { error: 'Could not read a hostname from the Caddyfile, so the cert file could not be located. Check the site block in ' + path.join(caddyDir, 'Caddyfile') + '.' }
+          : null;
+      } else {
         const certPath = path.join(caddyDir, `${status.caddyfile.hostname}.crt`);
         if (fs.existsSync(certPath)) {
           const certPem = fs.readFileSync(certPath, 'utf8');
@@ -897,7 +927,11 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
             valid_from: cert.validFrom,
             valid_to: cert.validTo,
             days_until_expiry: daysUntilExpiry,
-            warning: daysUntilExpiry < 14 ? 'expiring_soon' : (daysUntilExpiry < 0 ? 'expired' : null),
+            // Order matters: an expired cert is also < 14 days, so the
+            // expiry test has to come first. Reversed, 'expired' was
+            // unreachable and a dead cert showed an amber EXPIRING SOON
+            // badge next to a negative day count.
+            warning: daysUntilExpiry < 0 ? 'expired' : (daysUntilExpiry < 14 ? 'expiring_soon' : null),
           };
         }
       }
@@ -949,8 +983,7 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
     let hostname = null;
     try {
       const caddyfile = fs.readFileSync(path.join(caddyDir, 'Caddyfile'), 'utf8');
-      const m = caddyfile.match(/^([A-Za-z0-9.-]+\.ts\.net)\s*\{/m);
-      if (m) hostname = m[1];
+      hostname = parseCaddyfileSite(caddyfile).hostname;
     } catch { /* will fail below */ }
 
     if (!hostname) {
