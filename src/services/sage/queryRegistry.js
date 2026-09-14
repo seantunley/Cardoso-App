@@ -621,6 +621,28 @@ define({
 });
 
 define({
+  key: 'stocktake.item_master',
+  label: 'Stock take — item and unit master',
+  purpose: 'Every item with each of its units and the conversion to the stocking unit, so a scanned barcode can be tied to a specific pack size. Read-only; the stock take module never writes to Sage.',
+  pool: 'bat_sage',
+  tables: ['ICITEM', 'ICUNIT'],
+  params: [],
+  requiredColumns: ['item_number', 'unit', 'conversion'],
+  defaultSql: `
+  SELECT
+    LTRIM(RTRIM(i.ITEMNO))     AS item_number,
+    RTRIM(i.[DESC])            AS item_description,
+    LTRIM(RTRIM(i.STOCKUNIT))  AS stock_unit,
+    LTRIM(RTRIM(u.UNIT))       AS unit,
+    u.CONVERSION               AS conversion,
+    LTRIM(RTRIM(i.CATEGORY))   AS category,
+    i.INACTIVE                 AS inactive
+  FROM ICITEM i
+  INNER JOIN ICUNIT u ON u.ITEMNO = i.ITEMNO
+`,
+});
+
+define({
   key: 'pricing.price_lists',
   label: 'Pricing — price list enumeration',
   purpose: 'Available Sage price lists and their item counts.',
