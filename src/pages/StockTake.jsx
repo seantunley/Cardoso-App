@@ -208,7 +208,11 @@ export default function StockTake() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl p-3 pb-24 sm:p-4">
+    // Counting is done one-handed on a phone, so those tabs stay in a narrow
+    // column even on a big screen. Supervising is a desk job with a wide table
+    // — squeezing it into the phone width clipped the notes and wrapped the
+    // minus sign off the figures.
+    <div className={`mx-auto p-3 pb-24 sm:p-4 ${tab === "supervise" ? "max-w-[1400px]" : "max-w-2xl"}`}>
       {cameraOpen && (
         <BarcodeScanner
           onDetect={(code) => { setCameraOpen(false); submitEntry(code); }}

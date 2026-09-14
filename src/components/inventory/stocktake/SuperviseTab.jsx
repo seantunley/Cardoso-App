@@ -46,6 +46,17 @@ function money(v) {
   return `${n < 0 ? "-" : ""}R${Math.abs(n).toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+/** What is odd about a row, in words, for both the card and the table. */
+function rowNotes(r) {
+  const notes = [];
+  if (r.never_counted && r.expected_qty !== 0) notes.push("never counted");
+  if (r.not_in_snapshot) notes.push("not expected here");
+  if (r.counted_in_multiple_zones) notes.push(`counted in ${r.zone_count} zones`);
+  if (r.recount_done) notes.push(`recounted (first pass ${num(r.pass1_qty)})`);
+  else if (r.recount_required) notes.push("needs recount");
+  return notes.join(" · ");
+}
+
 const FILTERS = [
   ["recount", "Needs recount"],
   ["differences", "Differences"],
@@ -257,7 +268,9 @@ export default function SuperviseTab({ locations, sessions, onSessionsChanged })
               ].map(([label, value]) => (
                 <div key={label} className="rounded-lg border border-border bg-card px-3 py-2">
                   <div className="text-xs text-muted-foreground">{label}</div>
-                  <div className="text-lg font-semibold">{value}</div>
+                  {/* A big rand figure must not wrap its minus sign onto the
+                      line below — it reads as a surplus. */}
+                  <div className="truncate whitespace-nowrap text-lg font-semibold tabular-nums">{value}</div>
                 </div>
               ))}
             </div>
@@ -291,16 +304,50 @@ export default function SuperviseTab({ locations, sessions, onSessionsChanged })
               </div>
             )}
 
-            <div className="overflow-x-auto rounded-lg border border-border">
-              <table className="w-full min-w-[640px] text-sm">
+            {/* Phone: one card per item, because a six-column table at 400px
+                is unreadable however it is scrolled. Desk: the full table. */}
+            <div className="space-y-2 md:hidden">
+              {(variance.data?.rows || []).map((r) => (
+                <div key={r.item_number} className="rounded-lg border border-border bg-card p-3">
+                  <div className="font-medium leading-snug">{r.item_description || "(no description)"}</div>
+                  <div className="mb-2 text-xs text-muted-foreground">{r.item_number}{r.stock_unit ? ` · ${r.stock_unit}` : ""}</div>
+                  <div className="grid grid-cols-3 gap-2 text-sm">
+                    <div>
+                      <div className="text-xs text-muted-foreground">Counted</div>
+                      <div className="tabular-nums">{num(r.counted_qty)}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground">Expected</div>
+                      <div className="tabular-nums">{num(r.expected_qty)}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground">Out by</div>
+                      <div className={`whitespace-nowrap tabular-nums font-medium ${r.diff_qty < 0 ? "text-red-400" : r.diff_qty > 0 ? "text-emerald-400" : ""}`}>
+                        {num(r.diff_qty)}
+                      </div>
+                    </div>
+                  </div>
+                  <div className={`mt-2 whitespace-nowrap text-lg font-semibold tabular-nums ${r.diff_value < 0 ? "text-red-400" : r.diff_value > 0 ? "text-emerald-400" : ""}`}>
+                    {money(r.diff_value)}
+                  </div>
+                  {rowNotes(r) && <div className="mt-1 text-xs text-muted-foreground">{rowNotes(r)}</div>}
+                </div>
+              ))}
+              {(variance.data?.rows || []).length === 0 && (
+                <p className="rounded-lg border border-border px-3 py-4 text-center text-sm text-muted-foreground">Nothing under this filter.</p>
+              )}
+            </div>
+
+            <div className="hidden overflow-x-auto rounded-lg border border-border md:block">
+              <table className="w-full text-sm">
                 <thead className="bg-muted/40 text-xs text-muted-foreground">
                   <tr>
                     <th className="px-3 py-2 text-left">Item</th>
-                    <th className="px-3 py-2 text-right">Counted</th>
-                    <th className="px-3 py-2 text-right">Expected</th>
-                    <th className="px-3 py-2 text-right">Difference</th>
-                    <th className="px-3 py-2 text-right">Value</th>
-                    <th className="px-3 py-2 text-left">Notes</th>
+                    <th className="w-24 px-3 py-2 text-right">Counted</th>
+                    <th className="w-24 px-3 py-2 text-right">Expected</th>
+                    <th className="w-24 px-3 py-2 text-right">Out by</th>
+                    <th className="w-32 px-3 py-2 text-right">Value</th>
+                    <th className="w-64 px-3 py-2 text-left">Notes</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -310,20 +357,15 @@ export default function SuperviseTab({ locations, sessions, onSessionsChanged })
                         <div className="font-medium">{r.item_description || "(no description)"}</div>
                         <div className="text-xs text-muted-foreground">{r.item_number}{r.stock_unit ? ` · ${r.stock_unit}` : ""}</div>
                       </td>
-                      <td className="px-3 py-2 text-right">{num(r.counted_qty)}</td>
-                      <td className="px-3 py-2 text-right">{num(r.expected_qty)}</td>
-                      <td className={`px-3 py-2 text-right font-medium ${r.diff_qty < 0 ? "text-red-400" : r.diff_qty > 0 ? "text-emerald-400" : ""}`}>
+                      <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{num(r.counted_qty)}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{num(r.expected_qty)}</td>
+                      <td className={`whitespace-nowrap px-3 py-2 text-right font-medium tabular-nums ${r.diff_qty < 0 ? "text-red-400" : r.diff_qty > 0 ? "text-emerald-400" : ""}`}>
                         {num(r.diff_qty)}
                       </td>
-                      <td className={`px-3 py-2 text-right ${r.diff_value < 0 ? "text-red-400" : r.diff_value > 0 ? "text-emerald-400" : ""}`}>
+                      <td className={`whitespace-nowrap px-3 py-2 text-right tabular-nums ${r.diff_value < 0 ? "text-red-400" : r.diff_value > 0 ? "text-emerald-400" : ""}`}>
                         {money(r.diff_value)}
                       </td>
-                      <td className="px-3 py-2 text-xs text-muted-foreground">
-                        {r.never_counted && r.expected_qty !== 0 ? "never counted · " : ""}
-                        {r.not_in_snapshot ? "not expected here · " : ""}
-                        {r.counted_in_multiple_zones ? `counted in ${r.zone_count} zones · ` : ""}
-                        {r.recount_done ? `recounted (first pass ${num(r.pass1_qty)})` : r.recount_required ? "needs recount" : ""}
-                      </td>
+                      <td className="px-3 py-2 text-xs text-muted-foreground">{rowNotes(r)}</td>
                     </tr>
                   ))}
                   {(variance.data?.rows || []).length === 0 && (
