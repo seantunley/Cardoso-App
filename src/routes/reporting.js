@@ -2041,15 +2041,26 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     // "ready, nothing outstanding" instead of triggering the "no data yet"
     // warning (which is for sites that have never run the AR sync).
     let ledgerReady = false;
+    // When the AR ledger this report is built from was last pulled from Sage.
+    // The figure on screen is only ever as current as this: the sync runs at
+    // 04:45, and a branch can take millions in receipts before lunch. Without
+    // it on screen, a stale total gets compared against a live one somewhere
+    // else and the afternoon goes into working out which is wrong — neither is.
+    let arSyncedAt = null;
     if (isHub) {
       // Per-site ledger/snapshot decision (SYNC-5) is extracted so it can be
       // unit-tested against a seeded mixed-site DB. Each site is sourced from its
       // own best data: open-item ledger if its AR ETL has landed, hub_records
       // snapshot otherwise — a not-yet-synced site no longer vanishes.
       ({ rows, sites, ledgerReady } = acquireHubAgedDebtorRows(prep, siteFilter));
+      // Oldest site wins: the roll-up is only as fresh as its stalest branch.
+      try {
+        arSyncedAt = prep('SELECT MIN(last_synced_at) AS t FROM hub_debtor_ar_sync').get()?.t || null;
+      } catch { arSyncedAt = null; }
     } else {
       sites = [SITE_NAME];
-      ledgerReady = !!prep('SELECT last_synced_at FROM debtor_sync_meta WHERE id = 1').get()?.last_synced_at;
+      arSyncedAt = prep('SELECT last_synced_at FROM debtor_sync_meta WHERE id = 1').get()?.last_synced_at || null;
+      ledgerReady = !!arSyncedAt;
       rows = prep(
         `SELECT i.customer_code, i.reporting_account, i.document_number, i.document_type, i.document_date, i.due_date,
                 i.outstanding_amount, i.reference,
@@ -2197,6 +2208,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
       // data yet" (never synced). Keyed on the sync markers, not row count, so a
       // fully-paid synced branch no longer shows the "no AR data yet" warning.
       ledger_empty: !ledgerReady,
+      ar_synced_at: arSyncedAt,
       generated_at: new Date().toISOString(),
       site_name: SITE_NAME,
       hub_mode: isHub,
