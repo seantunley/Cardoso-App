@@ -335,6 +335,7 @@ export default function StockTake() {
       {tab === "supervise" && canSupervise && (
         <SuperviseTab
           locations={meta.data?.locations || []}
+          location={location}
           sessions={sessionsQuery.data?.sessions || []}
           onSessionsChanged={() => sessionsQuery.refetch()}
         />

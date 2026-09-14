@@ -117,6 +117,7 @@ import m111 from './v111_stock_take_barcodes.js';
 import m112 from './v112_stock_take_counting.js';
 import m113 from './v113_stock_take_zone_list.js';
 import m114 from './v114_stock_take_categories.js';
+import m115 from './v115_stock_take_commodities.js';
 
 const migrations = [
   m1,
@@ -233,6 +234,7 @@ const migrations = [
   m112,
   m113,
   m114,
+  m115,
 ];
 
 migrations.sort((a, b) => a.version - b.version);

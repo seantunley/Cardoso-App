@@ -637,6 +637,7 @@ define({
     u.CONVERSION               AS conversion,
     LTRIM(RTRIM(i.CATEGORY))   AS category,
     RTRIM(c.[DESC])            AS category_description,
+    LTRIM(RTRIM(i.COMMODIM))   AS commodity,
     i.INACTIVE                 AS inactive
   FROM ICITEM i
   INNER JOIN ICUNIT u ON u.ITEMNO = i.ITEMNO

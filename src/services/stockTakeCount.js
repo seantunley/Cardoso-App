@@ -44,6 +44,40 @@ export function listCategories(location) {
   `).all(loc, loc);
 }
 
+/**
+ * The commodities a branch holds stock in. Sage's coarse grouping — a
+ * handful of numbered codes the business talks in, where CATEGORY is the
+ * fine supplier/brand one. Sage has no description table for them, so the
+ * code is shown with a couple of real item names as a hint at what it is.
+ */
+export function listCommodities(location) {
+  const loc = String(location || '').trim();
+  return db.prepare(`
+    SELECT i.commodity,
+           COUNT(DISTINCT i.item_number) AS items,
+           COUNT(DISTINCT CASE WHEN o.qty_on_hand <> 0 THEN i.item_number END) AS stocked_items,
+           MIN(NULLIF(TRIM(i.item_description), '')) AS sample_first,
+           MAX(NULLIF(TRIM(i.item_description), '')) AS sample_last
+    FROM stocktake_item i
+    LEFT JOIN inventory_location_onhand o ON o.item_number = i.item_number AND (? = '' OR o.location = ?)
+    WHERE i.commodity IS NOT NULL AND i.commodity <> ''
+    GROUP BY i.commodity
+    HAVING stocked_items > 0
+    ORDER BY stocked_items DESC, i.commodity
+  `).all(loc, loc);
+}
+
+/** The commodities a count covers, or null for all of them. */
+export function sessionCommodities(session) {
+  if (!session?.commodities) return null;
+  try {
+    const list = JSON.parse(session.commodities);
+    return Array.isArray(list) && list.length ? list : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The groups a count covers, or null for the whole branch. */
 export function sessionCategories(session) {
   if (!session?.categories) return null;
@@ -69,9 +103,14 @@ export function sessionCategories(session) {
  * is a shutdown; counting a group at a time is a routine, and a routine is
  * what actually finds shrinkage.
  *
- * @param {{ name: string, location: string, categories?: string[], thresholdQty?: number, thresholdValue?: number, notes?: string, user: string }} args
+ * Product groups and commodities are two independent ways Sage slices the
+ * same stock, and the branch uses both. Picking from either narrows the
+ * count; an item is in it if it matches ANY of what was picked, because each
+ * chip names a slice of stock rather than a condition to combine.
+ *
+ * @param {{ name: string, location: string, categories?: string[], commodities?: string[], thresholdQty?: number, thresholdValue?: number, notes?: string, user: string }} args
  */
-export function openSession({ name, location, categories, thresholdQty, thresholdValue, notes, user }) {
+export function openSession({ name, location, categories, commodities, thresholdQty, thresholdValue, notes, user }) {
   const label = String(name || '').trim();
   const loc = String(location || '').trim();
   if (!label) throw new Error('The count needs a name, so people can tell it apart from the last one.');
@@ -96,22 +135,44 @@ export function openSession({ name, location, categories, thresholdQty, threshol
       throw new Error(`Sage has no product group called ${unknown.join(', ')}. Refresh the item list, then choose from the groups it offers.`);
     }
   }
-  const categoryFilter = groups.length
-    ? ` AND item_number IN (SELECT item_number FROM stocktake_item WHERE category IN (${placeholders(groups.length)}))`
+  const commodityList = Array.isArray(commodities)
+    ? [...new Set(commodities.map((c) => String(c || '').trim()).filter(Boolean))]
+    : [];
+  if (commodityList.length) {
+    const known = db.prepare(`SELECT DISTINCT commodity FROM stocktake_item WHERE commodity IN (${placeholders(commodityList.length)})`).all(...commodityList).map((r) => r.commodity);
+    const unknown = commodityList.filter((c) => !known.includes(c));
+    if (unknown.length) {
+      throw new Error(`Sage has no commodity ${unknown.join(', ')}. Refresh the item list, then choose from the commodities it offers.`);
+    }
+  }
+
+  // Either axis narrows the count, and an item qualifies on ANY match.
+  const scopeParts = [];
+  const scopeParams = [];
+  if (groups.length) {
+    scopeParts.push(`category IN (${placeholders(groups.length)})`);
+    scopeParams.push(...groups);
+  }
+  if (commodityList.length) {
+    scopeParts.push(`commodity IN (${placeholders(commodityList.length)})`);
+    scopeParams.push(...commodityList);
+  }
+  const categoryFilter = scopeParts.length
+    ? ` AND item_number IN (SELECT item_number FROM stocktake_item WHERE ${scopeParts.join(' OR ')})`
     : '';
 
   const create = db.transaction(() => {
     const info = db.prepare(`
-      INSERT INTO stocktake_session (name, location, status, categories, threshold_qty, threshold_value, opened_by, opened_date, notes)
-      VALUES (?, ?, 'open', ?, ?, ?, ?, now_local(), ?)
-    `).run(label, loc, groups.length ? JSON.stringify(groups) : null, qty, value, String(user || 'unknown'), String(notes || '').trim() || null);
+      INSERT INTO stocktake_session (name, location, status, categories, commodities, threshold_qty, threshold_value, opened_by, opened_date, notes)
+      VALUES (?, ?, 'open', ?, ?, ?, ?, ?, now_local(), ?)
+    `).run(label, loc, groups.length ? JSON.stringify(groups) : null, commodityList.length ? JSON.stringify(commodityList) : null, qty, value, String(user || 'unknown'), String(notes || '').trim() || null);
     const sessionId = Number(info.lastInsertRowid);
     const copied = db.prepare(`
       INSERT INTO stocktake_session_snapshot (session_id, item_number, qty_on_hand, total_cost)
       SELECT ?, item_number, qty_on_hand, total_cost
       FROM inventory_location_onhand
       WHERE location = ?${categoryFilter}
-    `).run(sessionId, loc, ...groups);
+    `).run(sessionId, loc, ...scopeParams);
     // Every aisle the branch has, ready to be claimed. A counter cannot add
     // one, so a count opened before the branch has a zone list has nothing to
     // count — zones_created is reported so the screen can say so plainly.
@@ -126,7 +187,7 @@ export function openSession({ name, location, categories, thresholdQty, threshol
   });
 
   const { sessionId, snapshotRows, zonesCreated } = create();
-  return { ...getSession(sessionId), snapshot_rows: snapshotRows, zones_created: zonesCreated, category_list: groups };
+  return { ...getSession(sessionId), snapshot_rows: snapshotRows, zones_created: zonesCreated, category_list: groups, commodity_list: commodityList };
 }
 
 export function getSession(id) {
@@ -415,8 +476,14 @@ export function searchItemsForCount({ q, sessionId, limit = 25 }) {
 
   // A count scoped to cigarettes should not offer sweets: showing the whole
   // catalogue is how something gets counted into the wrong count.
-  const groups = sessionId ? sessionCategories(getSession(sessionId)) : null;
-  const groupFilter = groups ? ` AND i.category IN (${placeholders(groups.length)})` : '';
+  const session = sessionId ? getSession(sessionId) : null;
+  const groups = session ? sessionCategories(session) : null;
+  const commodityList = session ? sessionCommodities(session) : null;
+  const scope = [];
+  const scopeParams = [];
+  if (groups) { scope.push(`i.category IN (${placeholders(groups.length)})`); scopeParams.push(...groups); }
+  if (commodityList) { scope.push(`i.commodity IN (${placeholders(commodityList.length)})`); scopeParams.push(...commodityList); }
+  const groupFilter = scope.length ? ` AND (${scope.join(' OR ')})` : '';
 
   return db.prepare(`
     SELECT i.item_number,
@@ -431,7 +498,7 @@ export function searchItemsForCount({ q, sessionId, limit = 25 }) {
     GROUP BY i.item_number
     ORDER BY (CASE WHEN i.item_number = ? THEN 0 ELSE 1 END), i.item_number
     LIMIT ?
-  `).all(`%${term}%`, `%${term}%`, ...(groups || []), term, safeLimit);
+  `).all(`%${term}%`, `%${term}%`, ...scopeParams, term, safeLimit);
 }
 
 /**

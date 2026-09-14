@@ -20,6 +20,7 @@ import {
   listRecountItems,
   listUnresolvedScans,
   listCategories,
+  listCommodities,
   searchItemsForCount,
   getZoneSummary,
   getZoneItems,
@@ -71,6 +72,7 @@ export function createStockTakeCountRouter({ requireAuth, requirePermission }) {
   router.use('/api/stock-take/count-lookup', hubBlocked);
   router.use('/api/stock-take/count-items', hubBlocked);
   router.use('/api/stock-take/categories', hubBlocked);
+  router.use('/api/stock-take/commodities', hubBlocked);
 
   // The product groups a branch holds, so a count can cover cigarettes only
   // rather than shutting the place down for everything at once.
@@ -79,6 +81,14 @@ export function createStockTakeCountRouter({ requireAuth, requirePermission }) {
       res.json({ categories: listCategories(String(req.query.location || '')) });
     } catch (err) {
       res.status(500).json({ error: `Could not read the product groups: ${err.message}` });
+    }
+  });
+
+  router.get('/api/stock-take/commodities', ...guard, (req, res) => {
+    try {
+      res.json({ commodities: listCommodities(String(req.query.location || '')) });
+    } catch (err) {
+      res.status(500).json({ error: `Could not read the commodities: ${err.message}` });
     }
   });
 
@@ -107,6 +117,7 @@ export function createStockTakeCountRouter({ requireAuth, requirePermission }) {
         name: req.body?.name,
         location: req.body?.location,
         categories: req.body?.categories,
+        commodities: req.body?.commodities,
         thresholdQty: req.body?.threshold_qty,
         thresholdValue: req.body?.threshold_value,
         notes: req.body?.notes,
@@ -118,7 +129,7 @@ export function createStockTakeCountRouter({ requireAuth, requirePermission }) {
         resourceType: 'stocktake_session',
         resourceId: String(session.id),
         resourceName: session.name,
-        details: `Opened stock count "${session.name}" at ${session.location}${session.category_list?.length ? `, covering ${session.category_list.join(', ')} only` : ''}. Recount threshold ${session.threshold_qty} units or R${session.threshold_value}. Snapshotted ${session.snapshot_rows} item(s) of expected stock.`,
+        details: `Opened stock count "${session.name}" at ${session.location}${session.category_list?.length || session.commodity_list?.length ? `, covering ${[...(session.category_list || []), ...(session.commodity_list || []).map((c) => `commodity ${c}`)].join(', ')} only` : ''}. Recount threshold ${session.threshold_qty} units or R${session.threshold_value}. Snapshotted ${session.snapshot_rows} item(s) of expected stock.`,
       });
       res.status(201).json(session);
     } catch (err) {

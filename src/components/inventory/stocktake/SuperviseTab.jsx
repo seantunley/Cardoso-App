@@ -65,13 +65,14 @@ const FILTERS = [
   ["all", "Everything"],
 ];
 
-export default function SuperviseTab({ locations, sessions, onSessionsChanged }) {
+export default function SuperviseTab({ locations, location, sessions, onSessionsChanged }) {
   const queryClient = useQueryClient();
   const [sessionId, setSessionId] = useState(null);
   const [filter, setFilter] = useState("recount");
   const [showOpenForm, setShowOpenForm] = useState(false);
   const [form, setForm] = useState({ name: "", location: "", threshold_qty: "1", threshold_value: "500", notes: "" });
   const [pickedCategories, setPickedCategories] = useState(/** @type {string[]} */ ([]));
+  const [pickedCommodities, setPickedCommodities] = useState(/** @type {string[]} */ ([]));
   const [zoneAdmin, setZoneAdmin] = useState(false);
   const [newZone, setNewZone] = useState("");
   const [openZoneId, setOpenZoneId] = useState(/** @type {number | null} */ (null));
@@ -83,10 +84,18 @@ export default function SuperviseTab({ locations, sessions, onSessionsChanged })
     setSessionId((openSession || sessions[0]).id);
   }, [sessions, openSession, sessionId]);
 
+  // Follow the branch picked at the top of the page. Having its own default
+  // meant the groups below were counted for a different branch than the one on
+  // screen, which just looks like wrong numbers.
   useEffect(() => {
-    if (form.location || !locations?.length) return;
-    setForm((f) => ({ ...f, location: locations[0].location }));
-  }, [locations, form.location]);
+    const next = location || locations?.[0]?.location;
+    if (form.location || !next) return;
+    setForm((f) => ({ ...f, location: next }));
+  }, [locations, location, form.location]);
+
+  useEffect(() => {
+    if (location && location !== form.location) setForm((f) => ({ ...f, location }));
+  }, [location]);
 
   const session = useMemo(() => (sessions || []).find((s) => s.id === sessionId), [sessions, sessionId]);
 
@@ -109,6 +118,12 @@ export default function SuperviseTab({ locations, sessions, onSessionsChanged })
   const categories = useQuery({
     queryKey: ["stock-take-categories", form.location],
     queryFn: () => apiFetch(`/api/stock-take/categories?location=${encodeURIComponent(form.location)}`),
+    enabled: Boolean(form.location),
+  });
+
+  const commodities = useQuery({
+    queryKey: ["stock-take-commodities", form.location],
+    queryFn: () => apiFetch(`/api/stock-take/commodities?location=${encodeURIComponent(form.location)}`),
     enabled: Boolean(form.location),
   });
 
@@ -139,7 +154,7 @@ export default function SuperviseTab({ locations, sessions, onSessionsChanged })
   const create = useMutation({
     mutationFn: (body) => apiSend("/api/stock-take/sessions", "POST", body),
     onSuccess: (s) => {
-      toast.success(`Count "${s.name}" opened at ${s.location}${s.category_list?.length ? ` for ${s.category_list.join(", ")}` : ""}. ${s.snapshot_rows} item(s) of expected stock recorded, ${s.zones_created} aisle(s) ready to count.`);
+      toast.success(`Count "${s.name}" opened at ${s.location}${s.category_list?.length || s.commodity_list?.length ? ` for ${[...(s.category_list || []), ...(s.commodity_list || []).map((c) => `commodity ${c}`)].join(", ")}` : ""}. ${s.snapshot_rows} item(s) of expected stock recorded, ${s.zones_created} aisle(s) ready to count.`);
       if (s.zones_created === 0) {
         toast.error(`${s.location} has no aisles set up, so nobody can start counting. Add them under "Aisles at this branch".`);
       }
@@ -261,7 +276,7 @@ export default function SuperviseTab({ locations, sessions, onSessionsChanged })
           </div>
           <div>
             <div className="mb-1 text-xs text-muted-foreground">
-              Product groups — leave all unpicked to count the whole branch
+              Product groups at {form.location || "this branch"} — leave all unpicked to count everything
             </div>
             <div className="flex flex-wrap gap-2">
               {(categories.data?.categories || []).map((c) => {
@@ -272,7 +287,7 @@ export default function SuperviseTab({ locations, sessions, onSessionsChanged })
                     onClick={() => setPickedCategories((prev) => (picked ? prev.filter((x) => x !== c.category) : [...prev, c.category]))}
                     className={`rounded-full border px-3 py-1 text-xs font-medium ${picked ? "border-sky-500 bg-sky-500/15 text-sky-300" : "border-border bg-background text-muted-foreground"}`}
                   >
-                    {c.category_description || c.category} ({c.stocked_items})
+                    {c.category_description || c.category} · {c.stocked_items} items
                   </button>
                 );
               })}
@@ -280,9 +295,33 @@ export default function SuperviseTab({ locations, sessions, onSessionsChanged })
                 <span className="text-xs text-muted-foreground">No product groups found — refresh the item list from Sage first.</span>
               )}
             </div>
+          </div>
+
+          <div>
+            <div className="mb-1 text-xs text-muted-foreground">
+              Commodities — Sage's other grouping, coarser than the product groups above
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {(commodities.data?.commodities || []).map((c) => {
+                const picked = pickedCommodities.includes(c.commodity);
+                return (
+                  <button
+                    key={c.commodity}
+                    onClick={() => setPickedCommodities((prev) => (picked ? prev.filter((x) => x !== c.commodity) : [...prev, c.commodity]))}
+                    title={[c.sample_first, c.sample_last].filter(Boolean).join("  ·  ")}
+                    className={`rounded-full border px-3 py-1 text-xs font-medium ${picked ? "border-sky-500 bg-sky-500/15 text-sky-300" : "border-border bg-background text-muted-foreground"}`}
+                  >
+                    Commodity {c.commodity} · {c.stocked_items} items
+                  </button>
+                );
+              })}
+              {commodities.data?.commodities?.length === 0 && (
+                <span className="text-xs text-muted-foreground">No commodities set on the items at this branch.</span>
+              )}
+            </div>
             <p className="mt-1 text-xs text-muted-foreground">
-              {pickedCategories.length
-                ? `Counting ${pickedCategories.length} group(s). Everything else at the branch is left out of this count entirely.`
+              {pickedCategories.length || pickedCommodities.length
+                ? `Counting anything in the ${pickedCategories.length} group(s) or ${pickedCommodities.length} commodity(ies) picked — an item is in the count if it matches either. Everything else at the branch is left out entirely.`
                 : "Counting everything the branch holds."}
             </p>
           </div>
@@ -291,7 +330,7 @@ export default function SuperviseTab({ locations, sessions, onSessionsChanged })
             Either threshold sends an item back for a recount by a different person. Expected quantities are recorded now, so sales during the count do not read as shortfalls.
           </p>
           <button
-            onClick={() => create.mutate({ ...form, categories: pickedCategories, threshold_qty: Number(form.threshold_qty), threshold_value: Number(form.threshold_value) })}
+            onClick={() => create.mutate({ ...form, categories: pickedCategories, commodities: pickedCommodities, threshold_qty: Number(form.threshold_qty), threshold_value: Number(form.threshold_value) })}
             disabled={create.isPending}
             className="w-full rounded-md border border-sky-500 bg-sky-500/15 px-3 py-2 text-sm font-medium text-sky-300 disabled:opacity-50"
           >
@@ -307,9 +346,14 @@ export default function SuperviseTab({ locations, sessions, onSessionsChanged })
         </div>
       )}
 
-      {session?.categories && (
+      {(session?.categories || session?.commodities) && (
         <p className="text-xs text-muted-foreground">
-          This count covers {JSON.parse(session.categories).join(", ")} only. Anything outside those groups is not part of it and will not show as missing.
+          This count covers{" "}
+          {[
+            ...(session.categories ? JSON.parse(session.categories) : []),
+            ...(session.commodities ? JSON.parse(session.commodities).map((c) => `commodity ${c}`) : []),
+          ].join(", ")}{" "}
+          only. Anything outside that is not part of the count and will not show as missing.
         </p>
       )}
 

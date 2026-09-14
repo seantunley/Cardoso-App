@@ -12,7 +12,7 @@ memDb.function('now_local', () => `2026-09-14 08:00:${String(clock++).padStart(2
 memDb.exec(`
   CREATE TABLE stocktake_item (
     item_number TEXT NOT NULL, unit TEXT NOT NULL, conversion REAL NOT NULL DEFAULT 1,
-    item_description TEXT, stock_unit TEXT, category TEXT, category_description TEXT,
+    item_description TEXT, stock_unit TEXT, category TEXT, category_description TEXT, commodity TEXT,
     inactive INTEGER NOT NULL DEFAULT 0, synced_at TEXT,
     PRIMARY KEY (item_number, unit)
   );
@@ -28,7 +28,7 @@ memDb.exec(`
   );
   CREATE TABLE stocktake_session (
     id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, location TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'open', categories TEXT, threshold_qty REAL NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'open', categories TEXT, commodities TEXT, threshold_qty REAL NOT NULL DEFAULT 1,
     threshold_value REAL NOT NULL DEFAULT 500, opened_by TEXT, opened_date TEXT,
     closed_by TEXT, closed_date TEXT, notes TEXT
   );
@@ -66,7 +66,7 @@ const {
   openSession, closeSession, addLocationZone, listLocationZones, setLocationZoneActive,
   claimZone, releaseZone, submitZone, recordScans, listZones,
   getVariance, listRecountItems, resolveForCount, voidScan, listUnresolvedScans,
-  listCategories, searchItemsForCount, getZoneSummary, getZoneItems,
+  listCategories, listCommodities, searchItemsForCount, getZoneSummary, getZoneItems,
 } = await import('../src/services/stockTakeCount.js');
 
 /** @type {any} */ let session;
@@ -81,9 +81,9 @@ beforeEach(() => {
     DELETE FROM stocktake_session_snapshot; DELETE FROM stocktake_session;
     DELETE FROM stocktake_item; DELETE FROM item_barcode; DELETE FROM inventory_location_onhand;
   `);
-  memDb.prepare("INSERT INTO stocktake_item VALUES ('110','CTN',1,'PETER BLUE 10S','CTN','20S','Cigarettes 20s',0,'x')").run();
-  memDb.prepare("INSERT INTO stocktake_item VALUES ('4010','CTN',1,'CAMEL SENSO','CTN','20S','Cigarettes 20s',0,'x')").run();
-  memDb.prepare("INSERT INTO stocktake_item VALUES ('9','BOX',1,'SWEETS','BOX','SWT','Sweets',0,'x')").run();
+  memDb.prepare("INSERT INTO stocktake_item VALUES ('110','CTN',1,'PETER BLUE 10S','CTN','20S','Cigarettes 20s','2',0,'x')").run();
+  memDb.prepare("INSERT INTO stocktake_item VALUES ('4010','CTN',1,'CAMEL SENSO','CTN','20S','Cigarettes 20s','2',0,'x')").run();
+  memDb.prepare("INSERT INTO stocktake_item VALUES ('9','BOX',1,'SWEETS','BOX','SWT','Sweets','1',0,'x')").run();
   // 110: 100 on hand at R391.58; 4010: 20 at R405.15; 9: 5 at R10.
   memDb.prepare("INSERT INTO inventory_location_onhand VALUES ('110','POL',100,39158,'x')").run();
   memDb.prepare("INSERT INTO inventory_location_onhand VALUES ('4010','POL',20,8103,'x')").run();
@@ -164,6 +164,30 @@ describe('counting part of the branch', () => {
       .toThrowError(/no product group called WIDGETS/i);
   });
 
+  it(`scopes by commodity as well, which is Sage's other grouping`, () => {
+    closeSession({ id: session.id, user: 'sean', force: true });
+    const sweets = openSession({ name: 'Sweets', location: 'POL', commodities: ['1'], user: 'sean' });
+    expect(getVariance(sweets.id, { filter: 'all' }).rows.map((r) => r.item_number)).toEqual(['9']);
+  });
+
+  it('takes an item that matches EITHER the group or the commodity picked', () => {
+    closeSession({ id: session.id, user: 'sean', force: true });
+    // Sweets by commodity, cigarettes by category — both slices, one count.
+    const both = openSession({ name: 'Mixed', location: 'POL', categories: ['20S'], commodities: ['1'], user: 'sean' });
+    expect(getVariance(both.id, { filter: 'all' }).rows.map((r) => r.item_number).sort()).toEqual(['110', '4010', '9']);
+  });
+
+  it('refuses a commodity Sage does not have', () => {
+    closeSession({ id: session.id, user: 'sean', force: true });
+    expect(() => openSession({ name: 'Nope', location: 'POL', commodities: ['99'], user: 'sean' }))
+      .toThrowError(/no commodity 99/i);
+  });
+
+  it('lists the commodities a branch holds stock in', () => {
+    expect(listCommodities('POL').map((c) => c.commodity).sort()).toEqual(['1', '2']);
+    expect(listCommodities('POL').find((c) => c.commodity === '2').stocked_items).toBe(2);
+  });
+
   it('lists the groups a branch actually holds stock in', () => {
     expect(listCategories('POL').map((c) => c.category).sort()).toEqual(['20S', 'SWT']);
     expect(listCategories('POL').find((c) => c.category === 'SWT').category_description).toBe('Sweets');
@@ -240,7 +264,7 @@ describe('recording scans', () => {
   });
 
   it('takes the pack size from the item list, not from the phone', () => {
-    memDb.prepare("INSERT INTO stocktake_item VALUES ('110','CASE',10,'PETER BLUE 10S','CTN','20S','Cigarettes 20s',0,'x')").run();
+    memDb.prepare("INSERT INTO stocktake_item VALUES ('110','CASE',10,'PETER BLUE 10S','CTN','20S','Cigarettes 20s','2',0,'x')").run();
     recordScans({ sessionId: session.id, zoneId: zone.id, scans: [scan({ unit: 'CASE', qty: 4 })], user: 'trudy' });
     const row = memDb.prepare('SELECT qty, conversion, stock_qty FROM stocktake_scan').get();
     expect(row).toMatchObject({ qty: 4, conversion: 10, stock_qty: 40 });

@@ -75,14 +75,15 @@ export async function syncItemsFromSage() {
   }
 
   const insert = db.prepare(`
-    INSERT INTO stocktake_item (item_number, unit, conversion, item_description, stock_unit, category, category_description, inactive, synced_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, now_local())
+    INSERT INTO stocktake_item (item_number, unit, conversion, item_description, stock_unit, category, category_description, commodity, inactive, synced_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, now_local())
     ON CONFLICT(item_number, unit) DO UPDATE SET
       conversion       = excluded.conversion,
       item_description = excluded.item_description,
       stock_unit       = excluded.stock_unit,
       category         = excluded.category,
       category_description = excluded.category_description,
+      commodity        = excluded.commodity,
       inactive         = excluded.inactive,
       synced_at        = now_local()
   `);
@@ -98,6 +99,7 @@ export async function syncItemsFromSage() {
         r.stock_unit ?? null,
         r.category ?? null,
         r.category_description ?? null,
+        r.commodity ?? null,
         Number(r.inactive) ? 1 : 0,
       );
     }
@@ -134,7 +136,9 @@ export function getStockTakeMeta() {
     FROM inventory_location_onhand
     WHERE qty_on_hand <> 0
     GROUP BY location
-    ORDER BY location
+    -- Busiest first: an alphabetical default landed on a 3-item branch and made
+    -- every screen that follows it look empty.
+    ORDER BY items DESC, location
   `).all();
 
   return {
