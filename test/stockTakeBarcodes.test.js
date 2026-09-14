@@ -35,7 +35,7 @@ vi.mock('../src/db/index.js', () => ({ default: memDb }));
 vi.mock('../src/services/batReconciliation.js', () => ({ getSagePool: vi.fn() }));
 vi.mock('../src/lib/errorLog.js', () => ({ logError: vi.fn() }));
 
-const { normaliseBarcode, barcodeVariants, lookupBarcode, saveBarcode, deleteBarcode } =
+const { normaliseBarcode, barcodeVariants, lookupBarcode, saveBarcode, deleteBarcode, updateBarcodeValue } =
   await import('../src/services/stockTake.js');
 
 beforeEach(() => {
@@ -127,6 +127,22 @@ describe('the map', () => {
     const r = lookupBarcode({ barcode: '6009999999999', location: 'POL' });
     expect(r.found).toBe(false);
     expect(r.reason).toBe('unmapped');
+  });
+
+  it('changes the barcode on a mapping without losing who made it', () => {
+    const saved = saveBarcode({ barcode: '6001234567890', itemNumber: '110', unit: 'CARTON', user: 'trudy' });
+    const updated = updateBarcodeValue({ id: saved.id, barcode: '6009999999999', user: 'sean' });
+    expect(updated).toMatchObject({ changed: true, barcode: '6009999999999', previous_barcode: '6001234567890', created_by: 'trudy', updated_by: 'sean' });
+    expect(lookupBarcode({ barcode: '6009999999999' }).item_number).toBe('110');
+    expect(lookupBarcode({ barcode: '6001234567890' }).found).toBe(false);
+  });
+
+  it('refuses to move a barcode onto one another item already uses', () => {
+    saveBarcode({ barcode: '6001234567890', itemNumber: '110', unit: 'CARTON', user: 'trudy' });
+    const second = saveBarcode({ barcode: '012345678905', itemNumber: '110', unit: 'EACH', user: 'trudy' });
+    // The 13-digit form of the first label counts as taken, not as a free number.
+    expect(() => updateBarcodeValue({ id: second.id, barcode: '6001234567890', user: 'sean' }))
+      .toThrowError(/already mapped to item 110/i);
   });
 
   it('returns the removed row so the deletion can be audited', () => {

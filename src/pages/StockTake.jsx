@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
-import { Barcode, Camera, RefreshCw, Search, Trash2, AlertTriangle, CheckCircle2, Info } from "lucide-react";
+import { Barcode, Camera, RefreshCw, Search, Trash2, AlertTriangle, CheckCircle2, Info, Pencil, X, Check } from "lucide-react";
 import { toast } from "sonner";
 import BarcodeScanner, { cameraUnavailableReason } from "@/components/inventory/BarcodeScanner";
 import CountTab from "@/components/inventory/stocktake/CountTab";
@@ -81,6 +81,12 @@ export default function StockTake() {
   // confirmation resends THAT unit rather than guessing at the first one.
   const [pendingUnit, setPendingUnit] = useState(/** @type {string | null} */ (null));
   const [mapSearch, setMapSearch] = useState("");
+  // Editing the barcode ON a row — an imported number with a digit out, or a
+  // supplier reprinting an outer. Re-pointing it at a different item is the
+  // other job, done from the Scan tab.
+  const [editingId, setEditingId] = useState(/** @type {number | null} */ (null));
+  const [editValue, setEditValue] = useState("");
+  const [editCamera, setEditCamera] = useState(false);
   const inputRef = useRef(/** @type {HTMLInputElement | null} */ (null));
 
   const cameraBlocked = useMemo(() => cameraUnavailableReason(), []);
@@ -165,6 +171,18 @@ export default function StockTake() {
     },
   });
 
+  const changeBarcode = useMutation({
+    mutationFn: ({ id, barcode }) => apiSend(`/api/stock-take/barcodes/${id}`, "PATCH", { barcode }),
+    onSuccess: (r) => {
+      toast.success(r.changed
+        ? `Item ${r.item_number} now reads ${r.barcode} (was ${r.previous_barcode}).`
+        : "That is already the barcode on this item.");
+      setEditingId(null);
+      refreshAll();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
   const removeMapping = useMutation({
     mutationFn: (id) => apiSend(`/api/stock-take/barcodes/${id}`, "DELETE"),
     onSuccess: (r) => {
@@ -217,6 +235,13 @@ export default function StockTake() {
         <BarcodeScanner
           onDetect={(code) => { setCameraOpen(false); submitEntry(code); }}
           onClose={() => { setCameraOpen(false); focusEntry(); }}
+        />
+      )}
+
+      {editCamera && (
+        <BarcodeScanner
+          onDetect={(code) => { setEditCamera(false); setEditValue(code); }}
+          onClose={() => setEditCamera(false)}
         />
       )}
 
@@ -526,28 +551,85 @@ export default function StockTake() {
 
           <ul className="divide-y divide-border rounded-lg border border-border">
             {(barcodes.data?.records || []).map((b) => (
-              <li key={b.id} className="flex items-start justify-between gap-3 px-3 py-2.5">
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-medium">{b.item_description || "(no description)"}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {b.barcode} → item {b.item_number} · 1 {b.unit}
-                    {b.conversion != null && b.conversion !== 1 && b.stock_unit ? ` = ${num(b.conversion, 2)} ${b.stock_unit}` : ""}
+              <li key={b.id} className="px-3 py-2.5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium">{b.item_description || "(no description)"}</div>
+                    {editingId === b.id ? (
+                      <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                        <input
+                          value={editValue}
+                          onChange={(e) => setEditValue(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") { e.preventDefault(); changeBarcode.mutate({ id: b.id, barcode: editValue }); }
+                            if (e.key === "Escape") setEditingId(null);
+                          }}
+                          autoFocus
+                          autoComplete="off"
+                          autoCapitalize="off"
+                          autoCorrect="off"
+                          spellCheck={false}
+                          className="min-w-0 flex-1 rounded-md border border-border bg-background px-2.5 py-2 font-mono text-sm outline-none focus:border-sky-500"
+                          aria-label={`Barcode for item ${b.item_number}`}
+                        />
+                        {!cameraBlocked && (
+                          <button
+                            onClick={() => setEditCamera(true)}
+                            className="rounded-md border border-border p-2"
+                            title="Scan the new label instead of typing it"
+                          >
+                            <Camera className="h-4 w-4" />
+                          </button>
+                        )}
+                        <button
+                          onClick={() => changeBarcode.mutate({ id: b.id, barcode: editValue })}
+                          disabled={changeBarcode.isPending}
+                          className="rounded-md border border-emerald-500/50 bg-emerald-500/15 p-2 text-emerald-300 disabled:opacity-50"
+                          title="Save"
+                        >
+                          <Check className="h-4 w-4" />
+                        </button>
+                        <button onClick={() => setEditingId(null)} className="rounded-md border border-border p-2" title="Cancel">
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="text-xs text-muted-foreground">
+                        <span className="font-mono">{b.barcode}</span> → item {b.item_number} · 1 {b.unit}
+                        {b.conversion != null && b.conversion !== 1 && b.stock_unit ? ` = ${num(b.conversion, 2)} ${b.stock_unit}` : ""}
+                      </div>
+                    )}
+                    {b.conversion == null && (
+                      <div className="text-xs text-amber-400">
+                        Sage no longer lists unit &quot;{b.unit}&quot; for this item — re-map it before counting.
+                      </div>
+                    )}
+                    <div className="text-[11px] text-muted-foreground">
+                      by {b.created_by || "unknown"}{b.created_date ? ` · ${b.created_date}` : ""}
+                      {b.updated_by && b.updated_by !== b.created_by ? ` · changed by ${b.updated_by} on ${b.updated_date}` : ""}
+                    </div>
                   </div>
-                  {b.conversion == null && (
-                    <div className="text-xs text-amber-400">
-                      Sage no longer lists unit &quot;{b.unit}&quot; for this item — re-map it before counting.
+                  {editingId !== b.id && (
+                    <div className="flex shrink-0 gap-2">
+                      <button
+                        onClick={() => { setEditingId(b.id); setEditValue(b.barcode); }}
+                        className="rounded-md border border-border p-2 text-muted-foreground"
+                        aria-label={`Change the barcode on item ${b.item_number}`}
+                        title="Change the barcode itself"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => removeMapping.mutate(b.id)}
+                        disabled={removeMapping.isPending}
+                        className="rounded-md border border-red-500/40 p-2 text-red-300 disabled:opacity-50"
+                        aria-label={`Remove the mapping for ${b.barcode}`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
                     </div>
                   )}
-                  <div className="text-[11px] text-muted-foreground">by {b.created_by || "unknown"}{b.created_date ? ` · ${b.created_date}` : ""}</div>
                 </div>
-                <button
-                  onClick={() => removeMapping.mutate(b.id)}
-                  disabled={removeMapping.isPending}
-                  className="shrink-0 rounded-md border border-red-500/40 p-2 text-red-300 disabled:opacity-50"
-                  aria-label={`Remove the mapping for ${b.barcode}`}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
               </li>
             ))}
           </ul>

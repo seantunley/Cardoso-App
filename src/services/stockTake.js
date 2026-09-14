@@ -292,6 +292,53 @@ export function saveBarcode({ barcode, itemNumber, unit, user, allowRemap = fals
   return { ok: true, changed: true, remapped: false, id: Number(info.lastInsertRowid), barcode: clean, item_number: item, unit: u };
 }
 
+/**
+ * Change the barcode itself on a mapping that already exists.
+ *
+ * Needed because a barcode can be wrong rather than the item: a label imported
+ * from another system with a digit out, a supplier reprinting an outer with a
+ * new number, or a code typed in by hand. Deleting and re-mapping would work
+ * but loses who mapped it and when, which is the trail that makes a count
+ * defensible.
+ *
+ * Changing what a barcode POINTS AT is the other operation — saveBarcode with
+ * allowRemap — and they are deliberately separate.
+ *
+ * @param {{ id: number, barcode: string, user?: string }} args
+ */
+export function updateBarcodeValue({ id, barcode, user }) {
+  const row = db.prepare('SELECT * FROM item_barcode WHERE id = ?').get(id);
+  if (!row) throw new Error('That barcode mapping no longer exists — someone may have removed it already.');
+
+  const clean = normaliseBarcode(barcode);
+  if (!clean) throw new Error('That barcode is not usable. Once spaces are removed it must be between 4 and 48 characters.');
+  if (clean === row.barcode) return { ok: true, changed: false, ...row };
+
+  // The other form of the same label counts as taken: a 12-digit UPC and its
+  // zero-padded 13-digit twin are one barcode, not two.
+  const variants = barcodeVariants(clean);
+  const clash = db.prepare(`
+    SELECT id, barcode, item_number, unit FROM item_barcode
+    WHERE barcode IN (${placeholders(variants.length)}) AND id <> ?
+    LIMIT 1
+  `).get(...variants, id);
+  if (clash) {
+    const err = new Error(`Barcode ${clean} is already mapped to item ${clash.item_number} (${clash.unit}). Remove that mapping first if this label really belongs to item ${row.item_number}.`);
+    /** @type {any} */ (err).code = 'BARCODE_IN_USE';
+    /** @type {any} */ (err).existing = clash;
+    throw err;
+  }
+
+  db.prepare('UPDATE item_barcode SET barcode = ?, updated_by = ?, updated_date = now_local() WHERE id = ?')
+    .run(clean, String(user || 'unknown'), id);
+  return {
+    ok: true,
+    changed: true,
+    ...db.prepare('SELECT * FROM item_barcode WHERE id = ?').get(id),
+    previous_barcode: row.barcode,
+  };
+}
+
 /** Remove one mapping. Returns the row that was removed, so it can be audited. */
 export function deleteBarcode(id) {
   const row = db.prepare('SELECT id, barcode, item_number, unit FROM item_barcode WHERE id = ?').get(id);

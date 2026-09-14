@@ -5,6 +5,7 @@ import {
   getItemUnits,
   lookupBarcode,
   saveBarcode,
+  updateBarcodeValue,
   deleteBarcode,
   listBarcodes,
   searchItems,
@@ -147,6 +148,34 @@ export function createStockTakeRouter({ requireAuth, requirePermission }) {
         });
       }
       res.status(result.changed && !result.remapped ? 201 : 200).json(result);
+    } catch (err) {
+      if (/** @type {any} */ (err).code === 'BARCODE_IN_USE') {
+        return res.status(409).json({ error: err.message, code: 'BARCODE_IN_USE', existing: /** @type {any} */ (err).existing });
+      }
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // Change the barcode ON a mapping. Re-pointing a barcode at a different item
+  // is the POST above; this is for when the number itself is wrong.
+  router.patch('/api/stock-take/barcodes/:id', ...guard, (req, res) => {
+    if (isHub()) return res.status(400).json({ error: HUB_MESSAGE });
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'Invalid barcode id.' });
+    const user = req.currentUser?.email || req.currentUser?.full_name || 'unknown';
+    try {
+      const result = updateBarcodeValue({ id, barcode: req.body?.barcode, user });
+      if (result.changed) {
+        logAudit({
+          req,
+          action: 'update',
+          resourceType: 'item_barcode',
+          resourceId: String(result.id),
+          resourceName: `${result.barcode} → ${result.item_number} (${result.unit})`,
+          details: `Changed the barcode on item ${result.item_number} (${result.unit}) from ${result.previous_barcode} to ${result.barcode}.`,
+        });
+      }
+      res.json(result);
     } catch (err) {
       if (/** @type {any} */ (err).code === 'BARCODE_IN_USE') {
         return res.status(409).json({ error: err.message, code: 'BARCODE_IN_USE', existing: /** @type {any} */ (err).existing });

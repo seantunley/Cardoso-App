@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
+import { registerNowLocal } from '../lib/nowLocal.js';
 
 const dbPath = process.env.DB_PATH || './database/cardoso.db';
 // Ensure database directory exists
@@ -90,13 +91,12 @@ for (const [key, val] of PRAGMAS) {
 // Column DEFAULT CURRENT_TIMESTAMP is still UTC (it's a SQLite built-in,
 // can't be overridden) — every INSERT that relies on the default must
 // be migrated to set the column explicitly with now_local().
-const SAST_OFFSET_MS = 2 * 60 * 60 * 1000;
+// The offset itself lives in src/lib/nowLocal.js so that scripts opening this
+// database directly take it from the same place instead of reinventing it — one
+// that used plain UTC wrote a thousand rows two hours behind.
 // better-sqlite3's .function() exists at runtime but the bundled @types
 // don't expose it on Database; cast so typecheck passes.
-/** @type {any} */ (db).function('now_local', () => {
-  const d = new Date(Date.now() + SAST_OFFSET_MS);
-  return d.toISOString().slice(0, 19).replace('T', ' ');
-});
+registerNowLocal(/** @type {any} */ (db));
 
 console.log(`✅ SQLite database ready → ${dbPath}`);
 
