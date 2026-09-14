@@ -44,6 +44,7 @@ const pagePermissions = {
   Jti: "can_access_jti",
   HubJti: "can_access_jti",
   StockReceipts: "can_access_stock_receipt_expiry",
+  StockTake: "can_access_stock_take",
 };
 
 const LayoutWrapper = ({ children, currentPageName }) =>
