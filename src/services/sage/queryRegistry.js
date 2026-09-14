@@ -625,7 +625,7 @@ define({
   label: 'Stock take — item and unit master',
   purpose: 'Every item with each of its units and the conversion to the stocking unit, so a scanned barcode can be tied to a specific pack size. Read-only; the stock take module never writes to Sage.',
   pool: 'bat_sage',
-  tables: ['ICITEM', 'ICUNIT'],
+  tables: ['ICITEM', 'ICUNIT', 'ICCATG'],
   params: [],
   requiredColumns: ['item_number', 'unit', 'conversion'],
   defaultSql: `
@@ -636,9 +636,11 @@ define({
     LTRIM(RTRIM(u.UNIT))       AS unit,
     u.CONVERSION               AS conversion,
     LTRIM(RTRIM(i.CATEGORY))   AS category,
+    RTRIM(c.[DESC])            AS category_description,
     i.INACTIVE                 AS inactive
   FROM ICITEM i
   INNER JOIN ICUNIT u ON u.ITEMNO = i.ITEMNO
+  LEFT JOIN ICCATG c ON c.CATEGORY = i.CATEGORY
 `,
 });
 

@@ -210,7 +210,9 @@ export const inventoryArticles = [
       {
         type: "steps",
         items: [
-          "On the **Supervise** tab, choose **Open a count**, name it, and pick the branch.",
+          "First, set up the branch's aisles. Under **Aisles at this branch**, add each aisle or shelf as people there name it. This is done once — every count from then on reuses the list, and counters can only pick from it.",
+          "Choose **Open a count**, name it, and pick the branch.",
+          "Optionally pick **product groups** — cigarettes only, or sweets and tobacco. Anything outside the groups you pick is not part of the count at all and will not show as missing. Pick none to count the whole branch.",
           "Set the two recount thresholds: how far out in **units**, and how far out in **rand**. Either one sends an item back for a recount.",
           "Opening the count records what Sage expected at that moment. Sales made while people are counting therefore do not show up as shortfalls.",
         ],
@@ -218,14 +220,15 @@ export const inventoryArticles = [
       {
         type: "callout",
         tone: "info",
-        text: "Only one count can be open per branch at a time. Two counts over the same shelves would fight.",
+        text: "Only one count can be open per branch at a time. Counting the cigarettes on a Tuesday and the sweets on a Thursday is a routine you can keep up; counting everything at once is a shutdown.",
       },
       { type: "h", text: "Counting" },
       {
         type: "steps",
         items: [
-          "On the **Count** tab, type the aisle or shelf you are about to count — anything you like, such as \"Aisle 3\" or \"Shelf B cold room\" — and press **Start**.",
+          "On the **Count** tab, take an aisle from the list. It shows which are free, which are being counted and by whom, and which are already handed in.",
           "Scan an item. The screen shows what it is; enter how many you counted and press **Add**.",
+          "If a label will not scan — torn, frosted, or never had one — use **Barcode will not scan? Find the item by name** and pick it from the list. It counts exactly the same.",
           "Keep going. Every scan is saved on the phone first and sent afterwards, so a dead spot in the warehouse costs you nothing.",
           "When the aisle is done, press **Hand in**.",
         ],
@@ -242,6 +245,7 @@ export const inventoryArticles = [
           "**A barcode that is not on the map still counts.** Enter the quantity anyway; it is held against the barcode and the supervisor sorts out which item it was.",
           "**Undo** takes a scan back. If it has already been sent it stays in the record, marked as taken back, so the trail is honest.",
           "A badge shows anything **waiting** to be sent. The zone cannot be handed in until it has all gone.",
+          "**Pause** leaves the aisle yours and comes back to it later. **Give back** releases it so somebody else can take it.",
         ],
       },
       { type: "h", text: "Recounts" },
@@ -258,12 +262,18 @@ export const inventoryArticles = [
           "**Never counted** — stock Sage expects that nobody found. Usually the most important list on the page.",
           "**Not expected here** — counted, but Sage has no stock of it at this branch.",
           "Differences are valued at what the stock was carried at when the count opened. **CSV** downloads whatever the current filter shows.",
+          "**Per zone**, the Zones list shows what each aisle found, what it is worth, and how many of its items were also counted in another aisle. Click one to see its items.",
         ],
       },
       {
         type: "callout",
         tone: "warning",
         text: "Closing a count locks it. If zones are still out or recounts are outstanding you are warned and have to confirm, and what was outstanding is written into the count's record.",
+      },
+      {
+        type: "callout",
+        tone: "info",
+        text: "There is no variance for a single aisle. Sage holds stock per branch, not per shelf, so there is no such thing as an expected quantity for Aisle 3 — only what it found. Variance is a branch-level figure, which is the only level Sage can answer at.",
       },
     ],
   },

@@ -4,7 +4,11 @@ import {
   closeSession,
   getSession,
   listSessions,
-  createZone,
+  listLocationZones,
+  addLocationZone,
+  setLocationZoneActive,
+  claimZone,
+  releaseZone,
   listZones,
   submitZone,
   reopenZone,
@@ -15,6 +19,11 @@ import {
   getVariance,
   listRecountItems,
   listUnresolvedScans,
+  listCategories,
+  searchItemsForCount,
+  getZoneSummary,
+  getZoneItems,
+  getItemZoneSplit,
   resolveScan,
 } from '../services/stockTakeCount.js';
 import { logAudit } from '../lib/audit.js';
@@ -57,8 +66,21 @@ export function createStockTakeCountRouter({ requireAuth, requirePermission }) {
   }
   router.use('/api/stock-take/sessions', hubBlocked);
   router.use('/api/stock-take/zones', hubBlocked);
+  router.use('/api/stock-take/location-zones', hubBlocked);
   router.use('/api/stock-take/scans', hubBlocked);
   router.use('/api/stock-take/count-lookup', hubBlocked);
+  router.use('/api/stock-take/count-items', hubBlocked);
+  router.use('/api/stock-take/categories', hubBlocked);
+
+  // The product groups a branch holds, so a count can cover cigarettes only
+  // rather than shutting the place down for everything at once.
+  router.get('/api/stock-take/categories', ...guard, (req, res) => {
+    try {
+      res.json({ categories: listCategories(String(req.query.location || '')) });
+    } catch (err) {
+      res.status(500).json({ error: `Could not read the product groups: ${err.message}` });
+    }
+  });
 
   // ── Sessions ──────────────────────────────────────────────────────────────
 
@@ -66,6 +88,8 @@ export function createStockTakeCountRouter({ requireAuth, requirePermission }) {
     try {
       res.json({
         can_supervise: isSupervisor(req),
+        // Who this browser is, so the zone list can say which aisle is yours.
+        me: whoami(req),
         sessions: listSessions({
           status: String(req.query.status || ''),
           location: String(req.query.location || ''),
@@ -82,6 +106,7 @@ export function createStockTakeCountRouter({ requireAuth, requirePermission }) {
       const session = openSession({
         name: req.body?.name,
         location: req.body?.location,
+        categories: req.body?.categories,
         thresholdQty: req.body?.threshold_qty,
         thresholdValue: req.body?.threshold_value,
         notes: req.body?.notes,
@@ -93,7 +118,7 @@ export function createStockTakeCountRouter({ requireAuth, requirePermission }) {
         resourceType: 'stocktake_session',
         resourceId: String(session.id),
         resourceName: session.name,
-        details: `Opened stock count "${session.name}" at ${session.location}. Recount threshold ${session.threshold_qty} units or R${session.threshold_value}. Snapshotted ${session.snapshot_rows} item(s) of expected stock.`,
+        details: `Opened stock count "${session.name}" at ${session.location}${session.category_list?.length ? `, covering ${session.category_list.join(', ')} only` : ''}. Recount threshold ${session.threshold_qty} units or R${session.threshold_value}. Snapshotted ${session.snapshot_rows} item(s) of expected stock.`,
       });
       res.status(201).json(session);
     } catch (err) {
@@ -142,17 +167,82 @@ export function createStockTakeCountRouter({ requireAuth, requirePermission }) {
     }
   });
 
-  router.post('/api/stock-take/sessions/:id/zones', ...guard, (req, res) => {
+  // Counters claim an aisle from the branch's list. There is deliberately no
+  // way to invent a zone here — free text turned into "Aisle 3", "aisle3" and
+  // "asile 3" for the same rack, and then nothing compares month to month.
+  router.post('/api/stock-take/zones/:zoneId/claim', ...guard, (req, res) => {
     try {
-      const zone = createZone({
-        sessionId: parseInt(req.params.id, 10),
-        name: req.body?.name,
-        // Only a supervisor may hand a zone to someone else; a counter claims
-        // it for themselves.
-        assignTo: isSupervisor(req) ? (req.body?.assigned_to || whoami(req)) : whoami(req),
+      const zone = claimZone({
+        zoneId: parseInt(req.params.zoneId, 10),
         user: whoami(req),
+        assignTo: req.body?.assigned_to,
+        isSupervisor: isSupervisor(req),
+      });
+      res.json(zone);
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  router.post('/api/stock-take/zones/:zoneId/release', ...guard, (req, res) => {
+    try {
+      const zone = releaseZone({
+        zoneId: parseInt(req.params.zoneId, 10),
+        user: whoami(req),
+        isSupervisor: isSupervisor(req),
+      });
+      res.json(zone);
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // ── The branch's standing zone list — supervisors own it ──────────────────
+
+  router.get('/api/stock-take/location-zones', ...guard, (req, res) => {
+    try {
+      res.json({
+        zones: listLocationZones(String(req.query.location || ''), {
+          includeInactive: req.query.include_inactive === 'true' && isSupervisor(req),
+        }),
+      });
+    } catch (err) {
+      res.status(500).json({ error: `Could not read the zone list: ${err.message}` });
+    }
+  });
+
+  router.post('/api/stock-take/location-zones', ...supervisorGuard, (req, res) => {
+    try {
+      const zone = addLocationZone({ location: req.body?.location, name: req.body?.name, user: whoami(req) });
+      logAudit({
+        req,
+        action: zone.reactivated ? 'update' : 'create',
+        resourceType: 'stocktake_location_zone',
+        resourceId: String(zone.id),
+        resourceName: `${zone.location} — ${zone.name}`,
+        details: zone.reactivated
+          ? `Brought the retired zone "${zone.name}" at ${zone.location} back into use.`
+          : `Added zone "${zone.name}" to ${zone.location}${zone.added_to_open_count ? ', and to the count that is open there' : ''}.`,
       });
       res.status(201).json(zone);
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  router.post('/api/stock-take/location-zones/:id/active', ...supervisorGuard, (req, res) => {
+    try {
+      const active = req.body?.active === true;
+      const zone = setLocationZoneActive({ id: parseInt(req.params.id, 10), active, user: whoami(req) });
+      logAudit({
+        req,
+        action: 'update',
+        resourceType: 'stocktake_location_zone',
+        resourceId: String(zone.id),
+        resourceName: `${zone.location} — ${zone.name}`,
+        details: `${active ? 'Brought back' : 'Retired'} zone "${zone.name}" at ${zone.location}. Counts already done keep naming it.`,
+      });
+      res.json(zone);
     } catch (err) {
       res.status(400).json({ error: err.message });
     }
@@ -212,6 +302,58 @@ export function createStockTakeCountRouter({ requireAuth, requirePermission }) {
       res.json(resolveForCount({ barcode }));
     } catch (err) {
       res.status(500).json({ error: `Could not look up barcode ${barcode}: ${err.message}` });
+    }
+  });
+
+  // For when a label will not scan: find the item by number or name. Blind,
+  // like the barcode lookup — no quantity, no cost.
+  router.get('/api/stock-take/count-items', ...guard, (req, res) => {
+    try {
+      res.json({
+        items: searchItemsForCount({
+          q: String(req.query.q || ''),
+          sessionId: parseInt(String(req.query.session_id), 10) || undefined,
+          limit: parseInt(String(req.query.limit), 10) || 25,
+        }),
+      });
+    } catch (err) {
+      res.status(500).json({ error: `Item search failed: ${err.message}` });
+    }
+  });
+
+  // ── What each zone found — supervisors only ───────────────────────────────
+
+  router.get('/api/stock-take/sessions/:id/zone-summary', ...supervisorGuard, (req, res) => {
+    try {
+      res.json({ zones: getZoneSummary(parseInt(req.params.id, 10)) });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  router.get('/api/stock-take/sessions/:id/zones/:zoneId/items', ...supervisorGuard, (req, res) => {
+    try {
+      res.json({
+        items: getZoneItems({
+          sessionId: parseInt(req.params.id, 10),
+          zoneId: parseInt(req.params.zoneId, 10),
+        }),
+      });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  router.get('/api/stock-take/sessions/:id/items/:itemNumber/zones', ...supervisorGuard, (req, res) => {
+    try {
+      res.json({
+        zones: getItemZoneSplit({
+          sessionId: parseInt(req.params.id, 10),
+          itemNumber: req.params.itemNumber,
+        }),
+      });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
     }
   });
 

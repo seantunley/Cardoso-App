@@ -75,13 +75,14 @@ export async function syncItemsFromSage() {
   }
 
   const insert = db.prepare(`
-    INSERT INTO stocktake_item (item_number, unit, conversion, item_description, stock_unit, category, inactive, synced_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, now_local())
+    INSERT INTO stocktake_item (item_number, unit, conversion, item_description, stock_unit, category, category_description, inactive, synced_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, now_local())
     ON CONFLICT(item_number, unit) DO UPDATE SET
       conversion       = excluded.conversion,
       item_description = excluded.item_description,
       stock_unit       = excluded.stock_unit,
       category         = excluded.category,
+      category_description = excluded.category_description,
       inactive         = excluded.inactive,
       synced_at        = now_local()
   `);
@@ -96,6 +97,7 @@ export async function syncItemsFromSage() {
         r.item_description ?? null,
         r.stock_unit ?? null,
         r.category ?? null,
+        r.category_description ?? null,
         Number(r.inactive) ? 1 : 0,
       );
     }

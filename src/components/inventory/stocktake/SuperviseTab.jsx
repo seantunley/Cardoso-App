@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Download, Lock, Plus, RotateCcw, ClipboardList } from "lucide-react";
+import { AlertTriangle, Download, Lock, Plus, RotateCcw, ClipboardList, MapPin, EyeOff, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 
 // The supervisor's view: progress, variance, recounts, and closing the count.
@@ -71,6 +71,10 @@ export default function SuperviseTab({ locations, sessions, onSessionsChanged })
   const [filter, setFilter] = useState("recount");
   const [showOpenForm, setShowOpenForm] = useState(false);
   const [form, setForm] = useState({ name: "", location: "", threshold_qty: "1", threshold_value: "500", notes: "" });
+  const [pickedCategories, setPickedCategories] = useState(/** @type {string[]} */ ([]));
+  const [zoneAdmin, setZoneAdmin] = useState(false);
+  const [newZone, setNewZone] = useState("");
+  const [openZoneId, setOpenZoneId] = useState(/** @type {number | null} */ (null));
 
   const openSession = useMemo(() => (sessions || []).find((s) => s.status === "open"), [sessions]);
 
@@ -98,6 +102,34 @@ export default function SuperviseTab({ locations, sessions, onSessionsChanged })
     enabled: Boolean(sessionId),
   });
 
+  // The branch whose aisles and product groups we are looking at: the count
+  // being read, or the one being set up.
+  const adminLocation = session?.location || form.location;
+
+  const categories = useQuery({
+    queryKey: ["stock-take-categories", form.location],
+    queryFn: () => apiFetch(`/api/stock-take/categories?location=${encodeURIComponent(form.location)}`),
+    enabled: Boolean(form.location),
+  });
+
+  const locationZones = useQuery({
+    queryKey: ["stock-take-location-zones", adminLocation],
+    queryFn: () => apiFetch(`/api/stock-take/location-zones?location=${encodeURIComponent(adminLocation)}&include_inactive=true`),
+    enabled: Boolean(adminLocation),
+  });
+
+  const zoneSummary = useQuery({
+    queryKey: ["stock-take-zone-summary", sessionId],
+    queryFn: () => apiFetch(`/api/stock-take/sessions/${sessionId}/zone-summary`),
+    enabled: Boolean(sessionId),
+  });
+
+  const zoneItems = useQuery({
+    queryKey: ["stock-take-zone-items", sessionId, openZoneId],
+    queryFn: () => apiFetch(`/api/stock-take/sessions/${sessionId}/zones/${openZoneId}/items`),
+    enabled: Boolean(sessionId && openZoneId),
+  });
+
   const unresolved = useQuery({
     queryKey: ["stock-take-unresolved", sessionId],
     queryFn: () => apiFetch(`/api/stock-take/sessions/${sessionId}/unresolved`),
@@ -107,7 +139,10 @@ export default function SuperviseTab({ locations, sessions, onSessionsChanged })
   const create = useMutation({
     mutationFn: (body) => apiSend("/api/stock-take/sessions", "POST", body),
     onSuccess: (s) => {
-      toast.success(`Count "${s.name}" opened at ${s.location}. ${s.snapshot_rows} item(s) of expected stock were recorded as the starting point.`);
+      toast.success(`Count "${s.name}" opened at ${s.location}${s.category_list?.length ? ` for ${s.category_list.join(", ")}` : ""}. ${s.snapshot_rows} item(s) of expected stock recorded, ${s.zones_created} aisle(s) ready to count.`);
+      if (s.zones_created === 0) {
+        toast.error(`${s.location} has no aisles set up, so nobody can start counting. Add them under "Aisles at this branch".`);
+      }
       setShowOpenForm(false);
       setSessionId(s.id);
       onSessionsChanged?.();
@@ -126,6 +161,29 @@ export default function SuperviseTab({ locations, sessions, onSessionsChanged })
       if (e.code === "COUNT_NOT_FINISHED") return; // shown inline with a confirm
       toast.error(e.message);
     },
+  });
+
+  const addZone = useMutation({
+    mutationFn: (name) => apiSend("/api/stock-take/location-zones", "POST", { location: adminLocation, name }),
+    onSuccess: (z) => {
+      toast.success(z.reactivated
+        ? `"${z.name}" is back in use at ${z.location}.`
+        : `"${z.name}" added to ${z.location}${z.added_to_open_count ? " and to the count that is open there" : ""}.`);
+      setNewZone("");
+      locationZones.refetch();
+      zones.refetch();
+      zoneSummary.refetch();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const retireZone = useMutation({
+    mutationFn: ({ id, active }) => apiSend(`/api/stock-take/location-zones/${id}/active`, "POST", { active }),
+    onSuccess: (z) => {
+      toast.success(`"${z.name}" ${z.active ? "is back in use" : "retired — counts already done still name it"}.`);
+      locationZones.refetch();
+    },
+    onError: (e) => toast.error(e.message),
   });
 
   const reopen = useMutation({
@@ -201,11 +259,39 @@ export default function SuperviseTab({ locations, sessions, onSessionsChanged })
               />
             </label>
           </div>
+          <div>
+            <div className="mb-1 text-xs text-muted-foreground">
+              Product groups — leave all unpicked to count the whole branch
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {(categories.data?.categories || []).map((c) => {
+                const picked = pickedCategories.includes(c.category);
+                return (
+                  <button
+                    key={c.category}
+                    onClick={() => setPickedCategories((prev) => (picked ? prev.filter((x) => x !== c.category) : [...prev, c.category]))}
+                    className={`rounded-full border px-3 py-1 text-xs font-medium ${picked ? "border-sky-500 bg-sky-500/15 text-sky-300" : "border-border bg-background text-muted-foreground"}`}
+                  >
+                    {c.category_description || c.category} ({c.stocked_items})
+                  </button>
+                );
+              })}
+              {categories.data?.categories?.length === 0 && (
+                <span className="text-xs text-muted-foreground">No product groups found — refresh the item list from Sage first.</span>
+              )}
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {pickedCategories.length
+                ? `Counting ${pickedCategories.length} group(s). Everything else at the branch is left out of this count entirely.`
+                : "Counting everything the branch holds."}
+            </p>
+          </div>
+
           <p className="text-xs text-muted-foreground">
             Either threshold sends an item back for a recount by a different person. Expected quantities are recorded now, so sales during the count do not read as shortfalls.
           </p>
           <button
-            onClick={() => create.mutate({ ...form, threshold_qty: Number(form.threshold_qty), threshold_value: Number(form.threshold_value) })}
+            onClick={() => create.mutate({ ...form, categories: pickedCategories, threshold_qty: Number(form.threshold_qty), threshold_value: Number(form.threshold_value) })}
             disabled={create.isPending}
             className="w-full rounded-md border border-sky-500 bg-sky-500/15 px-3 py-2 text-sm font-medium text-sky-300 disabled:opacity-50"
           >
@@ -221,36 +307,140 @@ export default function SuperviseTab({ locations, sessions, onSessionsChanged })
         </div>
       )}
 
+      {session?.categories && (
+        <p className="text-xs text-muted-foreground">
+          This count covers {JSON.parse(session.categories).join(", ")} only. Anything outside those groups is not part of it and will not show as missing.
+        </p>
+      )}
+
       {sessionId && (
         <>
-          {/* Progress */}
+          {/* What each zone found.
+
+              Sage holds stock per branch, not per shelf, so there is no
+              expected quantity for an aisle and therefore no per-zone
+              variance. What a zone can honestly report is what it found and
+              what that is worth — which is enough to spot the aisle that was
+              rushed, or the two people who counted the same rack. */}
           <div className="rounded-lg border border-border">
-            <div className="border-b border-border px-3 py-2 text-sm font-medium">
-              Zones {(zones.data?.zones || []).filter((z) => z.status === "submitted").length} of {(zones.data?.zones || []).length} handed in
+            <div className="flex items-center justify-between border-b border-border px-3 py-2">
+              <span className="text-sm font-medium">
+                Zones — {(zoneSummary.data?.zones || []).filter((z) => z.status === "submitted").length} of {(zoneSummary.data?.zones || []).length} handed in
+              </span>
+              <button onClick={() => setZoneAdmin((v) => !v)} className="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-xs">
+                <MapPin className="h-3.5 w-3.5" /> Aisles at this branch
+              </button>
             </div>
-            {(zones.data?.zones || []).length === 0 ? (
-              <p className="px-3 py-3 text-sm text-muted-foreground">Nobody has started a zone yet.</p>
+
+            {zoneAdmin && (
+              <div className="border-b border-border bg-muted/20 px-3 py-3">
+                <p className="mb-2 text-xs text-muted-foreground">
+                  The aisles and shelves at <strong>{adminLocation || "this branch"}</strong>. Counters pick from this list and cannot add to it — free text turned the same rack into three different names. Adding one here also adds it to a count that is already open.
+                </p>
+                <form
+                  onSubmit={(e) => { e.preventDefault(); if (newZone.trim()) addZone.mutate(newZone.trim()); }}
+                  className="mb-2 flex gap-2"
+                >
+                  <input
+                    value={newZone}
+                    onChange={(e) => setNewZone(e.target.value)}
+                    placeholder="Aisle 3, or Shelf B cold room"
+                    className="min-w-0 flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm outline-none"
+                  />
+                  <button type="submit" disabled={addZone.isPending} className="rounded-md border border-sky-500 bg-sky-500/15 px-3 py-2 text-sm font-medium text-sky-300 disabled:opacity-50">
+                    Add
+                  </button>
+                </form>
+                {(locationZones.data?.zones || []).length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No aisles yet. Add them and every count from now on reuses the same list.</p>
+                ) : (
+                  <ul className="divide-y divide-border rounded-md border border-border bg-background">
+                    {locationZones.data.zones.map((z) => (
+                      <li key={z.id} className="flex items-center justify-between gap-2 px-3 py-2 text-sm">
+                        <span className={z.active ? "" : "text-muted-foreground line-through"}>
+                          {z.name}
+                          {z.used_in_counts ? <span className="ml-2 text-xs text-muted-foreground">used in {z.used_in_counts} count(s)</span> : null}
+                        </span>
+                        <button
+                          onClick={() => retireZone.mutate({ id: z.id, active: !z.active })}
+                          className="flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1 text-xs"
+                          title={z.active ? "Retire this aisle — counts already done still name it" : "Bring it back into use"}
+                        >
+                          <EyeOff className="h-3 w-3" /> {z.active ? "Retire" : "Restore"}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+
+            {(zoneSummary.data?.zones || []).length === 0 ? (
+              <p className="px-3 py-3 text-sm text-muted-foreground">
+                This count has no aisles. Add them under <strong>Aisles at this branch</strong> — nobody can start counting until it has some.
+              </p>
             ) : (
               <ul className="divide-y divide-border">
-                {zones.data.zones.map((z) => (
-                  <li key={z.id} className="flex items-center justify-between gap-3 px-3 py-2">
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-medium">{z.name}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {z.assigned_to || "unassigned"} · {z.scans} scan(s), {z.items} item(s)
-                        {z.last_scan_at ? ` · last ${z.last_scan_at}` : ""}
+                {zoneSummary.data.zones.map((z) => (
+                  <li key={z.id}>
+                    <div className="flex items-center justify-between gap-3 px-3 py-2">
+                      <button
+                        onClick={() => setOpenZoneId(openZoneId === z.id ? null : z.id)}
+                        className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                      >
+                        <ChevronRight className={`h-4 w-4 shrink-0 transition-transform ${openZoneId === z.id ? "rotate-90" : ""}`} />
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-medium">{z.name}</span>
+                          <span className="block text-xs text-muted-foreground">
+                            {z.assigned_to || "nobody yet"} · {z.items} item(s), {num(z.counted_qty)} counted
+                            {z.recount_scans ? ` · ${z.recount_scans} recount scan(s)` : ""}
+                            {z.unmapped_scans ? ` · ${z.unmapped_scans} unknown barcode(s)` : ""}
+                            {z.items_also_in_another_zone ? ` · ${z.items_also_in_another_zone} item(s) also counted elsewhere` : ""}
+                          </span>
+                        </span>
+                      </button>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <span className="whitespace-nowrap text-sm tabular-nums">{money(z.counted_value)}</span>
+                        <span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-xs ${z.status === "submitted" ? "bg-emerald-500/15 text-emerald-300" : "bg-amber-500/15 text-amber-300"}`}>
+                          {z.status === "submitted" ? "handed in" : "counting"}
+                        </span>
+                        {z.status === "submitted" && session?.status === "open" && (
+                          <button onClick={() => reopen.mutate(z.id)} className="rounded-md border border-border p-1.5" title="Reopen this zone">
+                            <RotateCcw className="h-3.5 w-3.5" />
+                          </button>
+                        )}
                       </div>
                     </div>
-                    <div className="flex shrink-0 items-center gap-2">
-                      <span className={`rounded-full px-2 py-0.5 text-xs ${z.status === "submitted" ? "bg-emerald-500/15 text-emerald-300" : "bg-amber-500/15 text-amber-300"}`}>
-                        {z.status === "submitted" ? "handed in" : "counting"}
-                      </span>
-                      {z.status === "submitted" && session?.status === "open" && (
-                        <button onClick={() => reopen.mutate(z.id)} className="rounded-md border border-border p-1.5" title="Reopen this zone">
-                          <RotateCcw className="h-3.5 w-3.5" />
-                        </button>
-                      )}
-                    </div>
+
+                    {openZoneId === z.id && (
+                      <div className="border-t border-border bg-muted/10 px-3 py-2">
+                        {zoneItems.isFetching && <p className="text-sm text-muted-foreground">Loading…</p>}
+                        {zoneItems.data?.items?.length === 0 && <p className="text-sm text-muted-foreground">Nothing counted in this zone yet.</p>}
+                        {(zoneItems.data?.items || []).length > 0 && (
+                          <ul className="space-y-1">
+                            {zoneItems.data.items.map((it) => (
+                              <li key={it.item_number || it.barcode} className="flex items-start justify-between gap-3 text-sm">
+                                <span className="min-w-0">
+                                  <span className="block truncate">{it.item_description || `Unknown barcode ${it.barcode}`}</span>
+                                  <span className="block text-xs text-muted-foreground">
+                                    {it.item_number || "not matched to an item"} · by {it.counted_by}
+                                    {it.other_zones ? ` · also counted in ${it.other_zones}` : ""}
+                                    {it.branch_expected_qty != null ? ` · branch holds ${num(it.branch_expected_qty)}` : ""}
+                                  </span>
+                                </span>
+                                <span className="shrink-0 text-right">
+                                  <span className="block whitespace-nowrap tabular-nums">{num(it.zone_qty)} {it.stock_unit || ""}</span>
+                                  <span className="block whitespace-nowrap text-xs tabular-nums text-muted-foreground">{money(it.zone_value)}</span>
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          Sage holds stock per branch, not per shelf, so there is no expected figure for one aisle — only what it found. Variance stays a branch-level number.
+                        </p>
+                      </div>
+                    )}
                   </li>
                 ))}
               </ul>

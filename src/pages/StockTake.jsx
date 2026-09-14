@@ -302,6 +302,7 @@ export default function StockTake() {
       {tab === "count" && (
         <CountTab
           sessions={sessionsQuery.data?.sessions || []}
+          me={sessionsQuery.data?.me}
           onNeedSessions={() => sessionsQuery.refetch()}
         />
       )}

@@ -21,6 +21,40 @@ function placeholders(n) {
   return new Array(n).fill('?').join(', ');
 }
 
+// ── Product groups ──────────────────────────────────────────────────────────
+
+/**
+ * The product groups a branch holds, as Sage classifies them, with how many
+ * stocked items each covers so a supervisor can see the size of the job
+ * before opening the count.
+ */
+export function listCategories(location) {
+  const loc = String(location || '').trim();
+  return db.prepare(`
+    SELECT i.category,
+           MAX(i.category_description) AS category_description,
+           COUNT(DISTINCT i.item_number) AS items,
+           COUNT(DISTINCT CASE WHEN o.qty_on_hand <> 0 THEN i.item_number END) AS stocked_items
+    FROM stocktake_item i
+    LEFT JOIN inventory_location_onhand o ON o.item_number = i.item_number AND (? = '' OR o.location = ?)
+    WHERE i.category IS NOT NULL AND i.category <> ''
+    GROUP BY i.category
+    HAVING stocked_items > 0
+    ORDER BY stocked_items DESC, i.category
+  `).all(loc, loc);
+}
+
+/** The groups a count covers, or null for the whole branch. */
+export function sessionCategories(session) {
+  if (!session?.categories) return null;
+  try {
+    const list = JSON.parse(session.categories);
+    return Array.isArray(list) && list.length ? list : null;
+  } catch {
+    return null;
+  }
+}
+
 // ── Sessions ────────────────────────────────────────────────────────────────
 
 /**
@@ -30,9 +64,14 @@ function placeholders(n) {
  * against live on-hand would mean the target moves while people are still
  * walking the aisles — every sale during the count would read as a shortfall.
  *
- * @param {{ name: string, location: string, thresholdQty?: number, thresholdValue?: number, notes?: string, user: string }} args
+ * A count can cover the whole branch, or only certain product groups —
+ * cigarettes on a Tuesday, sweets on a Thursday. Counting everything at once
+ * is a shutdown; counting a group at a time is a routine, and a routine is
+ * what actually finds shrinkage.
+ *
+ * @param {{ name: string, location: string, categories?: string[], thresholdQty?: number, thresholdValue?: number, notes?: string, user: string }} args
  */
-export function openSession({ name, location, thresholdQty, thresholdValue, notes, user }) {
+export function openSession({ name, location, categories, thresholdQty, thresholdValue, notes, user }) {
   const label = String(name || '').trim();
   const loc = String(location || '').trim();
   if (!label) throw new Error('The count needs a name, so people can tell it apart from the last one.');
@@ -47,23 +86,47 @@ export function openSession({ name, location, thresholdQty, thresholdValue, note
   const value = Number.isFinite(Number(thresholdValue)) ? Number(thresholdValue) : 500;
   if (qty < 0 || value < 0) throw new Error('A recount threshold cannot be negative.');
 
+  const groups = Array.isArray(categories)
+    ? [...new Set(categories.map((c) => String(c || '').trim()).filter(Boolean))]
+    : [];
+  if (groups.length) {
+    const known = db.prepare(`SELECT DISTINCT category FROM stocktake_item WHERE category IN (${placeholders(groups.length)})`).all(...groups).map((r) => r.category);
+    const unknown = groups.filter((g) => !known.includes(g));
+    if (unknown.length) {
+      throw new Error(`Sage has no product group called ${unknown.join(', ')}. Refresh the item list, then choose from the groups it offers.`);
+    }
+  }
+  const categoryFilter = groups.length
+    ? ` AND item_number IN (SELECT item_number FROM stocktake_item WHERE category IN (${placeholders(groups.length)}))`
+    : '';
+
   const create = db.transaction(() => {
     const info = db.prepare(`
-      INSERT INTO stocktake_session (name, location, status, threshold_qty, threshold_value, opened_by, opened_date, notes)
-      VALUES (?, ?, 'open', ?, ?, ?, now_local(), ?)
-    `).run(label, loc, qty, value, String(user || 'unknown'), String(notes || '').trim() || null);
+      INSERT INTO stocktake_session (name, location, status, categories, threshold_qty, threshold_value, opened_by, opened_date, notes)
+      VALUES (?, ?, 'open', ?, ?, ?, ?, now_local(), ?)
+    `).run(label, loc, groups.length ? JSON.stringify(groups) : null, qty, value, String(user || 'unknown'), String(notes || '').trim() || null);
     const sessionId = Number(info.lastInsertRowid);
     const copied = db.prepare(`
       INSERT INTO stocktake_session_snapshot (session_id, item_number, qty_on_hand, total_cost)
       SELECT ?, item_number, qty_on_hand, total_cost
       FROM inventory_location_onhand
-      WHERE location = ?
-    `).run(sessionId, loc);
-    return { sessionId, snapshotRows: copied.changes };
+      WHERE location = ?${categoryFilter}
+    `).run(sessionId, loc, ...groups);
+    // Every aisle the branch has, ready to be claimed. A counter cannot add
+    // one, so a count opened before the branch has a zone list has nothing to
+    // count — zones_created is reported so the screen can say so plainly.
+    const zonesCreated = db.prepare(`
+      INSERT INTO stocktake_zone (session_id, location_zone_id, name, status, created_by, created_date)
+      SELECT ?, id, name, 'open', ?, now_local()
+      FROM stocktake_location_zone
+      WHERE location = ? AND active = 1
+      ORDER BY sort_order, name
+    `).run(sessionId, String(user || 'unknown'), loc);
+    return { sessionId, snapshotRows: copied.changes, zonesCreated: zonesCreated.changes };
   });
 
-  const { sessionId, snapshotRows } = create();
-  return { ...getSession(sessionId), snapshot_rows: snapshotRows };
+  const { sessionId, snapshotRows, zonesCreated } = create();
+  return { ...getSession(sessionId), snapshot_rows: snapshotRows, zones_created: zonesCreated, category_list: groups };
 }
 
 export function getSession(id) {
@@ -136,34 +199,123 @@ function requireOpenSession(sessionId) {
   return session;
 }
 
-// ── Zones ───────────────────────────────────────────────────────────────────
+// ── The branch's standing zone list ─────────────────────────────────────────
+//
+// Zones used to be typed by the counter. That fills up with "Aisle 3",
+// "aisle3" and "asile 3" within two counts, and then the same rack looks like
+// three different places and nothing compares month to month. The aisles of a
+// branch are a fixed fact about the building, so a supervisor sets them up
+// once and every count reuses them.
+
+/** The aisles and shelves a branch has. Retired ones are kept, not deleted. */
+export function listLocationZones(location, { includeInactive = false } = {}) {
+  const loc = String(location || '').trim();
+  return db.prepare(`
+    SELECT z.*, (SELECT COUNT(*) FROM stocktake_zone s WHERE s.location_zone_id = z.id) AS used_in_counts
+    FROM stocktake_location_zone z
+    WHERE z.location = ? ${includeInactive ? '' : 'AND z.active = 1'}
+    ORDER BY z.sort_order, z.name
+  `).all(loc);
+}
 
 /**
- * Claim an aisle or shelf. Free text, because no two branches lay out the same
- * and a fixed list would be wrong everywhere.
+ * Add an aisle to a branch's list. Supervisors only — enforced by the route.
  *
- * One owner per zone: two people on the same rack is a double count, and a
- * double count looks exactly like a genuine surplus.
+ * If a count is open at that branch the zone is added to it straight away,
+ * because the usual reason for adding one is that somebody is standing in
+ * front of a rack nobody listed.
  *
- * @param {{ sessionId: number, name: string, user: string, assignTo?: string }} args
+ * @param {{ location: string, name: string, user: string }} args
  */
-export function createZone({ sessionId, name, user, assignTo }) {
-  requireOpenSession(sessionId);
-  const label = String(name || '').trim();
-  if (!label) throw new Error('The zone needs a name — the aisle or shelf you are about to count, in your own words.');
+export function addLocationZone({ location, name, user }) {
+  const loc = String(location || '').trim();
+  const label = String(name || '').trim().replace(/\s+/g, ' ');
+  if (!loc) throw new Error('A zone has to belong to a branch.');
+  if (!label) throw new Error('The zone needs a name — the aisle or shelf as people at the branch call it.');
+  if (label.length > 60) throw new Error('That zone name is too long. Keep it to the aisle or shelf, under 60 characters.');
 
-  const existing = db.prepare('SELECT * FROM stocktake_zone WHERE session_id = ? AND LOWER(name) = LOWER(?)').get(sessionId, label);
-  if (existing) {
-    if (existing.assigned_to && existing.assigned_to !== (assignTo || user)) {
-      throw new Error(`"${existing.name}" is already being counted by ${existing.assigned_to}. Pick a different aisle, or ask them to submit it first.`);
+  const clash = db.prepare('SELECT * FROM stocktake_location_zone WHERE location = ? AND LOWER(name) = LOWER(?)').get(loc, label);
+  if (clash) {
+    if (!clash.active) {
+      db.prepare('UPDATE stocktake_location_zone SET active = 1 WHERE id = ?').run(clash.id);
+      return { ...db.prepare('SELECT * FROM stocktake_location_zone WHERE id = ?').get(clash.id), reactivated: true };
     }
-    return existing;
+    throw new Error(`${loc} already has a zone called "${clash.name}". Two zones with near-identical names is exactly what the list is there to prevent.`);
   }
+
+  const next = db.prepare('SELECT COALESCE(MAX(sort_order), 0) + 10 AS n FROM stocktake_location_zone WHERE location = ?').get(loc).n;
   const info = db.prepare(`
-    INSERT INTO stocktake_zone (session_id, name, assigned_to, status, created_by, created_date)
-    VALUES (?, ?, ?, 'open', ?, now_local())
-  `).run(sessionId, label, String(assignTo || user || '').trim() || null, String(user || 'unknown'));
-  return db.prepare('SELECT * FROM stocktake_zone WHERE id = ?').get(Number(info.lastInsertRowid));
+    INSERT INTO stocktake_location_zone (location, name, active, sort_order, created_by, created_date)
+    VALUES (?, ?, 1, ?, ?, now_local())
+  `).run(loc, label, next, String(user || 'unknown'));
+  const zone = db.prepare('SELECT * FROM stocktake_location_zone WHERE id = ?').get(Number(info.lastInsertRowid));
+
+  const open = db.prepare("SELECT id FROM stocktake_session WHERE location = ? AND status = 'open'").get(loc);
+  if (open) {
+    db.prepare(`
+      INSERT INTO stocktake_zone (session_id, location_zone_id, name, status, created_by, created_date)
+      VALUES (?, ?, ?, 'open', ?, now_local())
+    `).run(open.id, zone.id, zone.name, String(user || 'unknown'));
+  }
+  return { ...zone, added_to_open_count: Boolean(open) };
+}
+
+/**
+ * Retire a zone, or bring it back. Never deleted: counts already done name it,
+ * and a report that cannot say where something was counted is worth less.
+ */
+export function setLocationZoneActive({ id, active, user }) {
+  const zone = db.prepare('SELECT * FROM stocktake_location_zone WHERE id = ?').get(id);
+  if (!zone) throw new Error(`Zone #${id} is not on any branch's list.`);
+  db.prepare('UPDATE stocktake_location_zone SET active = ? WHERE id = ?').run(active ? 1 : 0, id);
+  return { ...db.prepare('SELECT * FROM stocktake_location_zone WHERE id = ?').get(id), changed_by: String(user || 'unknown') };
+}
+
+// ── Zones within one count ──────────────────────────────────────────────────
+
+/**
+ * Take an aisle. One owner at a time: two people on the same rack is a double
+ * count, and a double count reads exactly like a genuine surplus.
+ *
+ * A counter can only claim what the supervisor has listed — there is no way to
+ * invent a zone from the counting screen.
+ *
+ * @param {{ zoneId: number, user: string, assignTo?: string, isSupervisor?: boolean }} args
+ */
+export function claimZone({ zoneId, user, assignTo, isSupervisor = false }) {
+  const zone = db.prepare('SELECT * FROM stocktake_zone WHERE id = ?').get(zoneId);
+  if (!zone) throw new Error(`Zone #${zoneId} does not exist.`);
+  requireOpenSession(zone.session_id);
+  if (zone.status === SUBMITTED) {
+    throw new Error(`"${zone.name}" has been handed in by ${zone.submitted_by || 'someone'}. Ask a supervisor to reopen it if there is more to count.`);
+  }
+  // Only a supervisor hands a zone to somebody else.
+  const owner = isSupervisor && assignTo ? String(assignTo).trim() : String(user || 'unknown');
+  if (zone.assigned_to && zone.assigned_to !== owner && !isSupervisor) {
+    throw new Error(`"${zone.name}" is already being counted by ${zone.assigned_to}. Take a different aisle, or ask them to hand it in first.`);
+  }
+  db.prepare('UPDATE stocktake_zone SET assigned_to = ? WHERE id = ?').run(owner, zoneId);
+  return db.prepare('SELECT * FROM stocktake_zone WHERE id = ?').get(zoneId);
+}
+
+/**
+ * Give a zone back so somebody else can take it.
+ *
+ * Without this, a counter who claims an aisle and then goes home locks it for
+ * everyone. Scans already made stay where they are — only the claim is
+ * released.
+ *
+ * @param {{ zoneId: number, user: string, isSupervisor?: boolean }} args
+ */
+export function releaseZone({ zoneId, user, isSupervisor = false }) {
+  const zone = db.prepare('SELECT * FROM stocktake_zone WHERE id = ?').get(zoneId);
+  if (!zone) throw new Error(`Zone #${zoneId} does not exist.`);
+  requireOpenSession(zone.session_id);
+  if (zone.assigned_to && zone.assigned_to !== String(user || '') && !isSupervisor) {
+    throw new Error(`"${zone.name}" belongs to ${zone.assigned_to}. Only they or a supervisor can give it back.`);
+  }
+  db.prepare('UPDATE stocktake_zone SET assigned_to = NULL WHERE id = ?').run(zoneId);
+  return db.prepare('SELECT * FROM stocktake_zone WHERE id = ?').get(zoneId);
 }
 
 export function listZones(sessionId) {
@@ -173,8 +325,9 @@ export function listZones(sessionId) {
            (SELECT COUNT(DISTINCT c.item_number) FROM stocktake_scan c WHERE c.zone_id = z.id AND c.voided = 0) AS items,
            (SELECT MAX(c.received_at) FROM stocktake_scan c WHERE c.zone_id = z.id) AS last_scan_at
     FROM stocktake_zone z
+    LEFT JOIN stocktake_location_zone lz ON lz.id = z.location_zone_id
     WHERE z.session_id = ?
-    ORDER BY z.name
+    ORDER BY COALESCE(lz.sort_order, 999999), z.name
   `).all(sessionId);
 }
 
@@ -243,6 +396,45 @@ export function resolveForCount({ barcode }) {
 }
 
 /**
+ * Find an item by number or name, for counting.
+ *
+ * Labels get torn, frosted, or printed badly, and some stock never had a
+ * barcode. Without this a counter is stuck in front of a rack they cannot
+ * record, which is how counts end up on scraps of paper.
+ *
+ * Blind, like everything else a counter touches: no quantity, no cost. It is
+ * a separate function from the barcode map's item search, which deliberately
+ * DOES return on-hand for the supervisor.
+ *
+ * @param {{ q: string, sessionId?: number, limit?: number }} args
+ */
+export function searchItemsForCount({ q, sessionId, limit = 25 }) {
+  const term = String(q || '').trim();
+  if (term.length < 2) return [];
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 25, 100));
+
+  // A count scoped to cigarettes should not offer sweets: showing the whole
+  // catalogue is how something gets counted into the wrong count.
+  const groups = sessionId ? sessionCategories(getSession(sessionId)) : null;
+  const groupFilter = groups ? ` AND i.category IN (${placeholders(groups.length)})` : '';
+
+  return db.prepare(`
+    SELECT i.item_number,
+           MAX(i.item_description) AS item_description,
+           MAX(i.stock_unit)       AS stock_unit,
+           MAX(i.category)         AS category,
+           COUNT(*)                AS unit_count,
+           MAX(CASE WHEN b.id IS NULL THEN 0 ELSE 1 END) AS has_barcode
+    FROM stocktake_item i
+    LEFT JOIN item_barcode b ON b.item_number = i.item_number
+    WHERE (i.item_number LIKE ? OR i.item_description LIKE ?)${groupFilter}
+    GROUP BY i.item_number
+    ORDER BY (CASE WHEN i.item_number = ? THEN 0 ELSE 1 END), i.item_number
+    LIMIT ?
+  `).all(`%${term}%`, `%${term}%`, ...(groups || []), term, safeLimit);
+}
+
+/**
  * Record scans.
  *
  * Takes a batch because phones queue offline and hand over a backlog when the
@@ -287,6 +479,9 @@ export function recordScans({ sessionId, zoneId, scans, user }) {
       const pass = Number(s?.pass) === 2 ? 2 : 1;
       const itemNumber = String(s?.item_number || '').trim() || null;
       const barcode = String(s?.barcode || '').trim() || null;
+      // Either is enough: a scanned label with no item yet (the supervisor
+      // resolves it later), or an item picked by name because the label would
+      // not scan.
       if (!itemNumber && !barcode) { rejected.push({ client_id: clientId, reason: 'A scan needs either an item or the barcode that was scanned.' }); continue; }
 
       // A recount must be done by someone other than whoever counted it first.
@@ -359,6 +554,103 @@ export function voidScan({ scanId, user }) {
   return db.prepare('SELECT * FROM stocktake_scan WHERE id = ?').get(scanId);
 }
 
+
+// ── Per-zone reporting ──────────────────────────────────────────────────────
+//
+// A word on what a zone CAN be compared against. Sage holds stock per branch,
+// not per shelf — there is no ICILOC row for "Aisle 3" — so there is no such
+// thing as an expected quantity for a zone, and therefore no per-zone
+// variance. What a zone can honestly report is what it counted and what that
+// is worth, plus which items it shares with another zone. Variance stays a
+// whole-branch figure, which is the only level Sage can answer at.
+
+/** Unit cost as the snapshot carried it, so zone values and variance agree. */
+const SNAPSHOT_UNIT_COST = `COALESCE(sn.total_cost / NULLIF(sn.qty_on_hand, 0), 0)`;
+
+/** What every zone in a count has done: scans, items, quantity and value. */
+export function getZoneSummary(sessionId) {
+  const rows = db.prepare(`
+    SELECT z.id, z.name, z.assigned_to, z.status, z.submitted_by, z.submitted_date,
+           COUNT(c.id)                                    AS scans,
+           COUNT(DISTINCT c.item_number)                  AS items,
+           COALESCE(SUM(c.stock_qty), 0)                  AS counted_qty,
+           COALESCE(SUM(c.stock_qty * ${SNAPSHOT_UNIT_COST}), 0) AS counted_value,
+           SUM(CASE WHEN c.id IS NOT NULL AND c.item_number IS NULL THEN 1 ELSE 0 END) AS unmapped_scans,
+           SUM(CASE WHEN c.pass = 2 THEN 1 ELSE 0 END)     AS recount_scans,
+           MAX(c.received_at)                             AS last_scan_at
+    FROM stocktake_zone z
+    LEFT JOIN stocktake_scan c ON c.zone_id = z.id AND c.voided = 0
+    LEFT JOIN stocktake_session_snapshot sn ON sn.session_id = z.session_id AND sn.item_number = c.item_number
+    LEFT JOIN stocktake_location_zone lz ON lz.id = z.location_zone_id
+    WHERE z.session_id = ?
+    GROUP BY z.id
+    ORDER BY COALESCE(MAX(lz.sort_order), 999999), z.name
+  `).all(sessionId);
+
+  // Items this zone counted that another zone also counted. Not an error on
+  // its own — stock is genuinely split across racks — but it is the first
+  // thing to look at when a count comes back high.
+  const shared = db.prepare(`
+    SELECT c.zone_id, COUNT(DISTINCT c.item_number) AS n
+    FROM stocktake_scan c
+    WHERE c.session_id = ? AND c.voided = 0 AND c.item_number IS NOT NULL
+      AND EXISTS (
+        SELECT 1 FROM stocktake_scan o
+        WHERE o.session_id = c.session_id AND o.voided = 0
+          AND o.item_number = c.item_number AND o.zone_id <> c.zone_id
+      )
+    GROUP BY c.zone_id
+  `).all(sessionId);
+  const sharedBy = new Map(shared.map((r) => [r.zone_id, r.n]));
+
+  return rows.map((r) => ({ ...r, items_also_in_another_zone: sharedBy.get(r.id) || 0 }));
+}
+
+/**
+ * The items one zone counted.
+ *
+ * The expected quantity shown is the whole BRANCH figure, not the zone's.
+ * Sage cannot say how much of it should sit on one particular rack. It is
+ * shown so a supervisor can see whether a zone found most of the holding
+ * or a fraction of it.
+ */
+export function getZoneItems({ sessionId, zoneId }) {
+  return db.prepare(`
+    SELECT c.item_number,
+           MAX(i.item_description)        AS item_description,
+           MAX(i.stock_unit)              AS stock_unit,
+           MAX(c.barcode)                 AS barcode,
+           SUM(c.stock_qty)               AS zone_qty,
+           SUM(c.stock_qty * ${SNAPSHOT_UNIT_COST}) AS zone_value,
+           COUNT(*)                       AS scans,
+           MAX(sn.qty_on_hand)            AS branch_expected_qty,
+           GROUP_CONCAT(DISTINCT c.counted_by) AS counted_by,
+           (SELECT GROUP_CONCAT(DISTINCT z2.name)
+              FROM stocktake_scan o JOIN stocktake_zone z2 ON z2.id = o.zone_id
+             WHERE o.session_id = c.session_id AND o.voided = 0
+               AND o.item_number = c.item_number AND o.zone_id <> c.zone_id) AS other_zones
+    FROM stocktake_scan c
+    LEFT JOIN stocktake_session_snapshot sn ON sn.session_id = c.session_id AND sn.item_number = c.item_number
+    LEFT JOIN (SELECT item_number, MAX(item_description) AS item_description, MAX(stock_unit) AS stock_unit
+                 FROM stocktake_item GROUP BY item_number) i ON i.item_number = c.item_number
+    WHERE c.session_id = ? AND c.zone_id = ? AND c.voided = 0
+    GROUP BY c.item_number
+    ORDER BY zone_value DESC
+  `).all(sessionId, zoneId);
+}
+
+/** Which zones found an item, and how much each of them found. */
+export function getItemZoneSplit({ sessionId, itemNumber }) {
+  return db.prepare(`
+    SELECT z.name AS zone_name, c.pass, SUM(c.stock_qty) AS qty,
+           GROUP_CONCAT(DISTINCT c.counted_by) AS counted_by
+    FROM stocktake_scan c
+    JOIN stocktake_zone z ON z.id = c.zone_id
+    WHERE c.session_id = ? AND c.item_number = ? AND c.voided = 0
+    GROUP BY z.id, c.pass
+    ORDER BY z.name, c.pass
+  `).all(sessionId, itemNumber);
+}
 // ── Variance (supervisor only) ──────────────────────────────────────────────
 
 /**

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Camera, CheckCircle2, AlertTriangle, Undo2, CloudOff, Send, ClipboardList } from "lucide-react";
+import { Camera, CheckCircle2, AlertTriangle, Undo2, CloudOff, Send, ClipboardList, Search, Keyboard } from "lucide-react";
 import { toast } from "sonner";
 import BarcodeScanner, { cameraUnavailableReason } from "@/components/inventory/BarcodeScanner";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { loadQueue, saveQueue, enqueue, dequeue, pending, applyResult, makeClientId } from "@/lib/stocktakeQueue";
 
 // The counter's screen.
@@ -48,7 +49,7 @@ function Banner({ tone = "info", icon: Icon = AlertTriangle, children }) {
   );
 }
 
-export default function CountTab({ sessions, onNeedSessions }) {
+export default function CountTab({ sessions, onNeedSessions, me }) {
   const queryClient = useQueryClient();
   const [sessionId, setSessionId] = useState(null);
   const [zoneId, setZoneId] = useState(null);
@@ -62,10 +63,13 @@ export default function CountTab({ sessions, onNeedSessions }) {
   const [storageWorks, setStorageWorks] = useState(true);
   const [problems, setProblems] = useState(/** @type {any[]} */ ([]));
   const [sending, setSending] = useState(false);
+  const [byName, setByName] = useState("");
+  const [showByName, setShowByName] = useState(false);
   const scanRef = useRef(/** @type {HTMLInputElement | null} */ (null));
   const qtyRef = useRef(/** @type {HTMLInputElement | null} */ (null));
 
   const cameraBlocked = useMemo(() => cameraUnavailableReason(), []);
+  const debouncedByName = useDebouncedValue(byName, 250);
   const openSessions = useMemo(() => (sessions || []).filter((s) => s.status === "open"), [sessions]);
 
   // One open count is the normal case — drop straight into it.
@@ -84,6 +88,14 @@ export default function CountTab({ sessions, onNeedSessions }) {
     queryKey: ["stock-take-zone-scans", zoneId],
     queryFn: () => apiFetch(`/api/stock-take/zones/${zoneId}/scans?limit=50`),
     enabled: Boolean(zoneId),
+  });
+
+  // Blind, like everything else a counter sees: this returns the item and its
+  // unit, never a quantity.
+  const byNameResults = useQuery({
+    queryKey: ["stock-take-count-items", debouncedByName, sessionId],
+    queryFn: () => apiFetch(`/api/stock-take/count-items?q=${encodeURIComponent(debouncedByName)}&session_id=${sessionId}`),
+    enabled: showByName && debouncedByName.trim().length >= 2 && Boolean(sessionId),
   });
 
   const recounts = useQuery({
@@ -144,18 +156,47 @@ export default function CountTab({ sessions, onNeedSessions }) {
 
   function focusScan() { setTimeout(() => scanRef.current?.focus(), 0); }
 
-  async function joinZone(name) {
-    const label = String(name || "").trim();
-    if (!label) return;
+  /** Take an aisle from the branch's list. Counters cannot invent one. */
+  async function claimZone(zone) {
     try {
-      const zone = await apiSend(`/api/stock-take/sessions/${sessionId}/zones`, "POST", { name: label });
-      setZoneId(zone.id);
-      setZoneName(zone.name);
+      const claimed = await apiSend(`/api/stock-take/zones/${zone.id}/claim`, "POST");
+      setZoneId(claimed.id);
+      setZoneName(claimed.name);
       zones.refetch();
       focusScan();
     } catch (err) {
       toast.error(err.message);
     }
+  }
+
+  /** Give it back, so somebody else can take it if you are done for the day. */
+  async function leaveZone(release) {
+    if (release && zoneId) {
+      try {
+        await apiSend(`/api/stock-take/zones/${zoneId}/release`, "POST");
+        zones.refetch();
+      } catch (err) {
+        toast.error(err.message);
+      }
+    }
+    setZoneId(null);
+    setHeld(null);
+  }
+
+  /** A label that will not scan: pick the item by hand instead. */
+  function holdItem(item) {
+    setHeld({
+      found: true,
+      barcode: null,
+      item_number: item.item_number,
+      item_description: item.item_description,
+      unit: item.stock_unit,
+      picked_by_name: true,
+    });
+    setByName("");
+    setShowByName(false);
+    setQty("");
+    setTimeout(() => qtyRef.current?.focus(), 0);
   }
 
   async function onScan(raw) {
@@ -274,41 +315,39 @@ export default function CountTab({ sessions, onNeedSessions }) {
             Pick the aisle or shelf you are about to count. One person per zone — if two of you count the same rack it reads as a surplus.
           </Banner>
 
-          <form
-            onSubmit={(e) => { e.preventDefault(); joinZone(zoneName); }}
-            className="flex gap-2"
-          >
-            <input
-              value={zoneName}
-              onChange={(e) => setZoneName(e.target.value)}
-              placeholder="Aisle 3, or Shelf B cold room"
-              className="min-w-0 flex-1 rounded-lg border border-border bg-card px-3 py-3 text-base outline-none focus:border-sky-500"
-            />
-            <button type="submit" className="rounded-lg border border-sky-500 bg-sky-500/15 px-4 py-3 text-sm font-medium text-sky-300">
-              Start
-            </button>
-          </form>
-
-          {(zones.data?.zones || []).length > 0 && (
+          {(zones.data?.zones || []).length === 0 ? (
+            <Banner tone="warn">
+              This branch has no aisles set up yet, so there is nothing to count against. A supervisor adds them on the <strong>Supervise</strong> tab — they are set up once and every count reuses them.
+            </Banner>
+          ) : (
             <ul className="divide-y divide-border rounded-lg border border-border">
-              {zones.data.zones.map((z) => (
-                <li key={z.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-medium">{z.name}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {z.assigned_to || "unassigned"} · {z.scans} scan(s){z.status === "submitted" ? " · handed in" : ""}
+              {zones.data.zones.map((z) => {
+                const mine = z.assigned_to === me;
+                const takenByOther = Boolean(z.assigned_to) && !mine;
+                return (
+                  <li key={z.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium">{z.name}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {z.status === "submitted"
+                          ? `handed in by ${z.submitted_by || "someone"}`
+                          : takenByOther
+                            ? `being counted by ${z.assigned_to}`
+                            : mine ? "yours" : "free"}
+                        {z.scans ? ` · ${z.scans} scan(s)` : ""}
+                      </div>
                     </div>
-                  </div>
-                  {z.status !== "submitted" && (
-                    <button
-                      onClick={() => { setZoneId(z.id); setZoneName(z.name); focusScan(); }}
-                      className="shrink-0 rounded-md border border-border px-3 py-1.5 text-xs font-medium"
-                    >
-                      Open
-                    </button>
-                  )}
-                </li>
-              ))}
+                    {z.status !== "submitted" && !takenByOther && (
+                      <button
+                        onClick={() => claimZone(z)}
+                        className={`shrink-0 rounded-md border px-3 py-1.5 text-xs font-medium ${mine ? "border-sky-500 bg-sky-500/15 text-sky-300" : "border-border"}`}
+                      >
+                        {mine ? "Carry on" : "Take it"}
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
@@ -327,8 +366,11 @@ export default function CountTab({ sessions, onNeedSessions }) {
                   <CloudOff className="h-3.5 w-3.5" /> {outbox.length} waiting
                 </span>
               )}
-              <button onClick={() => { setZoneId(null); setHeld(null); }} className="rounded-md border border-border px-3 py-1.5 text-xs">
-                Leave
+              <button onClick={() => leaveZone(false)} className="rounded-md border border-border px-3 py-1.5 text-xs">
+                Pause
+              </button>
+              <button onClick={() => leaveZone(true)} className="rounded-md border border-border px-3 py-1.5 text-xs" title="Give the aisle back so somebody else can take it">
+                Give back
               </button>
             </div>
           </div>
@@ -379,12 +421,57 @@ export default function CountTab({ sessions, onNeedSessions }) {
             )}
           </form>
 
+          <div>
+            <button
+              onClick={() => { setShowByName((v) => !v); setByName(""); }}
+              className="flex items-center gap-1.5 text-xs text-muted-foreground underline"
+            >
+              <Keyboard className="h-3.5 w-3.5" />
+              {showByName ? "Hide" : "Barcode will not scan? Find the item by name"}
+            </button>
+          </div>
+
+          {showByName && (
+            <div className="space-y-2 rounded-lg border border-border bg-card p-3">
+              <div className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2">
+                <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <input
+                  autoFocus
+                  value={byName}
+                  onChange={(e) => setByName(e.target.value)}
+                  placeholder="Item number or name"
+                  className="min-w-0 flex-1 bg-transparent text-base outline-none"
+                />
+              </div>
+              {byNameResults.data?.items?.length > 0 && (
+                <ul className="max-h-64 divide-y divide-border overflow-y-auto rounded-lg border border-border">
+                  {byNameResults.data.items.map((it) => (
+                    <li key={it.item_number}>
+                      <button onClick={() => holdItem(it)} className="w-full px-3 py-2.5 text-left hover:bg-muted/50">
+                        <span className="block truncate text-sm font-medium">{it.item_description || "(no description)"}</span>
+                        <span className="block text-xs text-muted-foreground">
+                          {it.item_number}{it.stock_unit ? ` · counted in ${it.stock_unit}` : ""}{it.has_barcode ? "" : " · no barcode on file"}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {debouncedByName.trim().length >= 2 && byNameResults.data?.items?.length === 0 && (
+                <p className="text-sm text-muted-foreground">Nothing matches that. Try the item number, or part of the name as Sage spells it.</p>
+              )}
+            </div>
+          )}
+
           {held && (
             <div className={`space-y-3 rounded-lg border p-3 ${held.found ? "border-emerald-500/40 bg-emerald-500/5" : "border-amber-500/40 bg-amber-500/5"}`}>
               {held.found ? (
                 <div>
                   <div className="text-base font-semibold">{held.item_description || "(no description)"}</div>
-                  <div className="text-sm text-muted-foreground">Item {held.item_number} · counting in {held.unit}</div>
+                  <div className="text-sm text-muted-foreground">
+                    Item {held.item_number} · counting in {held.unit}
+                    {held.picked_by_name ? " · picked by name" : ""}
+                  </div>
                 </div>
               ) : (
                 <div>
