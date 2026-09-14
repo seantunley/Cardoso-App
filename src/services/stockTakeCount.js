@@ -67,6 +67,40 @@ export function listCommodities(location) {
   `).all(loc, loc);
 }
 
+/**
+ * The vendors a branch holds stock from.
+ *
+ * item_vendor is filled by the Inventory Movement sync, not by this module,
+ * so it can be empty on a site that has never run one. That is reported as an
+ * empty list rather than an error — the screen says where it comes from.
+ */
+export function listVendors(location) {
+  const loc = String(location || '').trim();
+  return db.prepare(`
+    SELECT v.vendor_code,
+           MAX(v.vendor_name) AS vendor_name,
+           COUNT(DISTINCT v.item_number) AS items,
+           COUNT(DISTINCT CASE WHEN o.qty_on_hand <> 0 THEN v.item_number END) AS stocked_items
+    FROM item_vendor v
+    LEFT JOIN inventory_location_onhand o ON o.item_number = v.item_number AND (? = '' OR o.location = ?)
+    WHERE v.vendor_code IS NOT NULL AND v.vendor_code <> ''
+    GROUP BY v.vendor_code
+    HAVING stocked_items > 0
+    ORDER BY stocked_items DESC, vendor_name
+  `).all(loc, loc);
+}
+
+/** The vendors a count covers, or null for all of them. */
+export function sessionVendors(session) {
+  if (!session?.vendors) return null;
+  try {
+    const list = JSON.parse(session.vendors);
+    return Array.isArray(list) && list.length ? list : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The commodities a count covers, or null for all of them. */
 export function sessionCommodities(session) {
   if (!session?.commodities) return null;
@@ -108,9 +142,9 @@ export function sessionCategories(session) {
  * count; an item is in it if it matches ANY of what was picked, because each
  * chip names a slice of stock rather than a condition to combine.
  *
- * @param {{ name: string, location: string, categories?: string[], commodities?: string[], thresholdQty?: number, thresholdValue?: number, notes?: string, user: string }} args
+ * @param {{ name: string, location: string, categories?: string[], commodities?: string[], vendors?: string[], thresholdQty?: number, thresholdValue?: number, notes?: string, user: string }} args
  */
-export function openSession({ name, location, categories, commodities, thresholdQty, thresholdValue, notes, user }) {
+export function openSession({ name, location, categories, commodities, vendors, thresholdQty, thresholdValue, notes, user }) {
   const label = String(name || '').trim();
   const loc = String(location || '').trim();
   if (!label) throw new Error('The count needs a name, so people can tell it apart from the last one.');
@@ -146,7 +180,18 @@ export function openSession({ name, location, categories, commodities, threshold
     }
   }
 
-  // Either axis narrows the count, and an item qualifies on ANY match.
+  const vendorList = Array.isArray(vendors)
+    ? [...new Set(vendors.map((v) => String(v || '').trim()).filter(Boolean))]
+    : [];
+  if (vendorList.length) {
+    const known = db.prepare(`SELECT DISTINCT vendor_code FROM item_vendor WHERE vendor_code IN (${placeholders(vendorList.length)})`).all(...vendorList).map((r) => r.vendor_code);
+    const unknown = vendorList.filter((v) => !known.includes(v));
+    if (unknown.length) {
+      throw new Error(`No item at this branch is attributed to vendor ${unknown.join(', ')}. The item-to-vendor list comes from the Inventory Movement sync — run that if it is out of date.`);
+    }
+  }
+
+  // Any axis narrows the count, and an item qualifies on ANY match.
   const scopeParts = [];
   const scopeParams = [];
   if (groups.length) {
@@ -157,15 +202,19 @@ export function openSession({ name, location, categories, commodities, threshold
     scopeParts.push(`commodity IN (${placeholders(commodityList.length)})`);
     scopeParams.push(...commodityList);
   }
+  if (vendorList.length) {
+    scopeParts.push(`item_number IN (SELECT item_number FROM item_vendor WHERE vendor_code IN (${placeholders(vendorList.length)}))`);
+    scopeParams.push(...vendorList);
+  }
   const categoryFilter = scopeParts.length
     ? ` AND item_number IN (SELECT item_number FROM stocktake_item WHERE ${scopeParts.join(' OR ')})`
     : '';
 
   const create = db.transaction(() => {
     const info = db.prepare(`
-      INSERT INTO stocktake_session (name, location, status, categories, commodities, threshold_qty, threshold_value, opened_by, opened_date, notes)
-      VALUES (?, ?, 'open', ?, ?, ?, ?, ?, now_local(), ?)
-    `).run(label, loc, groups.length ? JSON.stringify(groups) : null, commodityList.length ? JSON.stringify(commodityList) : null, qty, value, String(user || 'unknown'), String(notes || '').trim() || null);
+      INSERT INTO stocktake_session (name, location, status, categories, commodities, vendors, threshold_qty, threshold_value, opened_by, opened_date, notes)
+      VALUES (?, ?, 'open', ?, ?, ?, ?, ?, ?, now_local(), ?)
+    `).run(label, loc, groups.length ? JSON.stringify(groups) : null, commodityList.length ? JSON.stringify(commodityList) : null, vendorList.length ? JSON.stringify(vendorList) : null, qty, value, String(user || 'unknown'), String(notes || '').trim() || null);
     const sessionId = Number(info.lastInsertRowid);
     const copied = db.prepare(`
       INSERT INTO stocktake_session_snapshot (session_id, item_number, qty_on_hand, total_cost)
@@ -187,7 +236,7 @@ export function openSession({ name, location, categories, commodities, threshold
   });
 
   const { sessionId, snapshotRows, zonesCreated } = create();
-  return { ...getSession(sessionId), snapshot_rows: snapshotRows, zones_created: zonesCreated, category_list: groups, commodity_list: commodityList };
+  return { ...getSession(sessionId), snapshot_rows: snapshotRows, zones_created: zonesCreated, category_list: groups, commodity_list: commodityList, vendor_list: vendorList };
 }
 
 export function getSession(id) {
@@ -483,6 +532,11 @@ export function searchItemsForCount({ q, sessionId, limit = 25 }) {
   const scopeParams = [];
   if (groups) { scope.push(`i.category IN (${placeholders(groups.length)})`); scopeParams.push(...groups); }
   if (commodityList) { scope.push(`i.commodity IN (${placeholders(commodityList.length)})`); scopeParams.push(...commodityList); }
+  const vendorList = session ? sessionVendors(session) : null;
+  if (vendorList) {
+    scope.push(`i.item_number IN (SELECT item_number FROM item_vendor WHERE vendor_code IN (${placeholders(vendorList.length)}))`);
+    scopeParams.push(...vendorList);
+  }
   const groupFilter = scope.length ? ` AND (${scope.join(' OR ')})` : '';
 
   return db.prepare(`

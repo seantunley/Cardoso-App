@@ -28,7 +28,7 @@ memDb.exec(`
   );
   CREATE TABLE stocktake_session (
     id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, location TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'open', categories TEXT, commodities TEXT, threshold_qty REAL NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'open', categories TEXT, commodities TEXT, vendors TEXT, threshold_qty REAL NOT NULL DEFAULT 1,
     threshold_value REAL NOT NULL DEFAULT 500, opened_by TEXT, opened_date TEXT,
     closed_by TEXT, closed_date TEXT, notes TEXT
   );
@@ -51,6 +51,9 @@ memDb.exec(`
     counted_at TEXT, received_at TEXT NOT NULL, voided INTEGER NOT NULL DEFAULT 0,
     voided_by TEXT, voided_date TEXT, note TEXT
   );
+  CREATE TABLE item_vendor (
+    item_number TEXT PRIMARY KEY, vendor_code TEXT, vendor_name TEXT, synced_at TEXT
+  );
   CREATE TABLE stocktake_session_snapshot (
     session_id INTEGER NOT NULL, item_number TEXT NOT NULL,
     qty_on_hand REAL NOT NULL DEFAULT 0, total_cost REAL NOT NULL DEFAULT 0,
@@ -66,7 +69,7 @@ const {
   openSession, closeSession, addLocationZone, listLocationZones, setLocationZoneActive,
   claimZone, releaseZone, submitZone, recordScans, listZones,
   getVariance, listRecountItems, resolveForCount, voidScan, listUnresolvedScans,
-  listCategories, listCommodities, searchItemsForCount, getZoneSummary, getZoneItems,
+  listCategories, listCommodities, listVendors, searchItemsForCount, getZoneSummary, getZoneItems,
 } = await import('../src/services/stockTakeCount.js');
 
 /** @type {any} */ let session;
@@ -80,6 +83,7 @@ beforeEach(() => {
     DELETE FROM stocktake_scan; DELETE FROM stocktake_zone; DELETE FROM stocktake_location_zone;
     DELETE FROM stocktake_session_snapshot; DELETE FROM stocktake_session;
     DELETE FROM stocktake_item; DELETE FROM item_barcode; DELETE FROM inventory_location_onhand;
+    DELETE FROM item_vendor;
   `);
   memDb.prepare("INSERT INTO stocktake_item VALUES ('110','CTN',1,'PETER BLUE 10S','CTN','20S','Cigarettes 20s','2',0,'x')").run();
   memDb.prepare("INSERT INTO stocktake_item VALUES ('4010','CTN',1,'CAMEL SENSO','CTN','20S','Cigarettes 20s','2',0,'x')").run();
@@ -88,6 +92,9 @@ beforeEach(() => {
   memDb.prepare("INSERT INTO inventory_location_onhand VALUES ('110','POL',100,39158,'x')").run();
   memDb.prepare("INSERT INTO inventory_location_onhand VALUES ('4010','POL',20,8103,'x')").run();
   memDb.prepare("INSERT INTO inventory_location_onhand VALUES ('9','POL',5,50,'x')").run();
+  memDb.prepare("INSERT INTO item_vendor VALUES ('110','EJTIN01','JT INTERNATIONAL S.A','x')").run();
+  memDb.prepare("INSERT INTO item_vendor VALUES ('4010','EJTIN01','JT INTERNATIONAL S.A','x')").run();
+  memDb.prepare("INSERT INTO item_vendor VALUES ('9','EBEAC01','BEACON','x')").run();
   // The branch's aisles, set up once by a supervisor.
   addLocationZone({ location: 'POL', name: 'Aisle 1', user: 'sean' });
   addLocationZone({ location: 'POL', name: 'Aisle 2', user: 'sean' });
@@ -175,6 +182,30 @@ describe('counting part of the branch', () => {
     // Sweets by commodity, cigarettes by category — both slices, one count.
     const both = openSession({ name: 'Mixed', location: 'POL', categories: ['20S'], commodities: ['1'], user: 'sean' });
     expect(getVariance(both.id, { filter: 'all' }).rows.map((r) => r.item_number).sort()).toEqual(['110', '4010', '9']);
+  });
+
+  it('scopes by vendor — one supplier counted in a pass', () => {
+    closeSession({ id: session.id, user: 'sean', force: true });
+    const jti = openSession({ name: 'JTI', location: 'POL', vendors: ['EJTIN01'], user: 'sean' });
+    expect(getVariance(jti.id, { filter: 'all' }).rows.map((r) => r.item_number).sort()).toEqual(['110', '4010']);
+  });
+
+  it('mixes vendor with the other axes, still on ANY match', () => {
+    closeSession({ id: session.id, user: 'sean', force: true });
+    const mixed = openSession({ name: 'Mixed', location: 'POL', vendors: ['EBEAC01'], commodities: ['2'], user: 'sean' });
+    expect(getVariance(mixed.id, { filter: 'all' }).rows.map((r) => r.item_number).sort()).toEqual(['110', '4010', '9']);
+  });
+
+  it('refuses a vendor nothing at the branch is attributed to', () => {
+    closeSession({ id: session.id, user: 'sean', force: true });
+    expect(() => openSession({ name: 'Nope', location: 'POL', vendors: ['ENOPE99'], user: 'sean' }))
+      .toThrowError(/Inventory Movement sync/i);
+  });
+
+  it('lists vendors by how much stock they account for', () => {
+    const list = listVendors('POL');
+    expect(list.map((v) => v.vendor_code)).toEqual(['EJTIN01', 'EBEAC01']);
+    expect(list[0]).toMatchObject({ vendor_name: 'JT INTERNATIONAL S.A', stocked_items: 2 });
   });
 
   it('refuses a commodity Sage does not have', () => {

@@ -73,6 +73,8 @@ export default function SuperviseTab({ locations, location, sessions, onSessions
   const [form, setForm] = useState({ name: "", location: "", threshold_qty: "1", threshold_value: "500", notes: "" });
   const [pickedCategories, setPickedCategories] = useState(/** @type {string[]} */ ([]));
   const [pickedCommodities, setPickedCommodities] = useState(/** @type {string[]} */ ([]));
+  const [pickedVendors, setPickedVendors] = useState(/** @type {string[]} */ ([]));
+  const [vendorSearch, setVendorSearch] = useState("");
   const [zoneAdmin, setZoneAdmin] = useState(false);
   const [newZone, setNewZone] = useState("");
   const [openZoneId, setOpenZoneId] = useState(/** @type {number | null} */ (null));
@@ -127,6 +129,12 @@ export default function SuperviseTab({ locations, location, sessions, onSessions
     enabled: Boolean(form.location),
   });
 
+  const vendors = useQuery({
+    queryKey: ["stock-take-vendors", form.location],
+    queryFn: () => apiFetch(`/api/stock-take/vendors?location=${encodeURIComponent(form.location)}`),
+    enabled: Boolean(form.location),
+  });
+
   const locationZones = useQuery({
     queryKey: ["stock-take-location-zones", adminLocation],
     queryFn: () => apiFetch(`/api/stock-take/location-zones?location=${encodeURIComponent(adminLocation)}&include_inactive=true`),
@@ -154,7 +162,7 @@ export default function SuperviseTab({ locations, location, sessions, onSessions
   const create = useMutation({
     mutationFn: (body) => apiSend("/api/stock-take/sessions", "POST", body),
     onSuccess: (s) => {
-      toast.success(`Count "${s.name}" opened at ${s.location}${s.category_list?.length || s.commodity_list?.length ? ` for ${[...(s.category_list || []), ...(s.commodity_list || []).map((c) => `commodity ${c}`)].join(", ")}` : ""}. ${s.snapshot_rows} item(s) of expected stock recorded, ${s.zones_created} aisle(s) ready to count.`);
+      toast.success(`Count "${s.name}" opened at ${s.location}${s.category_list?.length || s.commodity_list?.length || s.vendor_list?.length ? ` for ${[...(s.category_list || []), ...(s.commodity_list || []).map((c) => `commodity ${c}`), ...(s.vendor_list || []).map((v) => `vendor ${v}`)].join(", ")}` : ""}. ${s.snapshot_rows} item(s) of expected stock recorded, ${s.zones_created} aisle(s) ready to count.`);
       if (s.zones_created === 0) {
         toast.error(`${s.location} has no aisles set up, so nobody can start counting. Add them under "Aisles at this branch".`);
       }
@@ -319,9 +327,47 @@ export default function SuperviseTab({ locations, location, sessions, onSessions
                 <span className="text-xs text-muted-foreground">No commodities set on the items at this branch.</span>
               )}
             </div>
+          </div>
+
+          <div>
+            <div className="mb-1 flex flex-wrap items-center gap-2">
+              <span className="text-xs text-muted-foreground">Vendors — count one supplier's stock in a pass</span>
+              {(vendors.data?.vendors || []).length > 8 && (
+                <input
+                  value={vendorSearch}
+                  onChange={(e) => setVendorSearch(e.target.value)}
+                  placeholder="Filter vendors"
+                  className="ml-auto w-40 rounded-md border border-border bg-background px-2 py-1 text-xs outline-none"
+                />
+              )}
+            </div>
+            <div className="flex max-h-40 flex-wrap gap-2 overflow-y-auto">
+              {(vendors.data?.vendors || [])
+                .filter((v) => pickedVendors.includes(v.vendor_code)
+                  || !vendorSearch.trim()
+                  || `${v.vendor_name} ${v.vendor_code}`.toLowerCase().includes(vendorSearch.trim().toLowerCase()))
+                .map((v) => {
+                  const picked = pickedVendors.includes(v.vendor_code);
+                  return (
+                    <button
+                      key={v.vendor_code}
+                      onClick={() => setPickedVendors((prev) => (picked ? prev.filter((x) => x !== v.vendor_code) : [...prev, v.vendor_code]))}
+                      title={v.vendor_code}
+                      className={`rounded-full border px-3 py-1 text-xs font-medium ${picked ? "border-sky-500 bg-sky-500/15 text-sky-300" : "border-border bg-background text-muted-foreground"}`}
+                    >
+                      {v.vendor_name || v.vendor_code} · {v.stocked_items} items
+                    </button>
+                  );
+                })}
+              {vendors.data?.vendors?.length === 0 && (
+                <span className="text-xs text-muted-foreground">
+                  No items are attributed to a vendor yet. That list comes from the Inventory Movement sync — run it once and vendors appear here.
+                </span>
+              )}
+            </div>
             <p className="mt-1 text-xs text-muted-foreground">
-              {pickedCategories.length || pickedCommodities.length
-                ? `Counting anything in the ${pickedCategories.length} group(s) or ${pickedCommodities.length} commodity(ies) picked — an item is in the count if it matches either. Everything else at the branch is left out entirely.`
+              {pickedCategories.length || pickedCommodities.length || pickedVendors.length
+                ? `Counting anything in the ${pickedCategories.length} group(s), ${pickedCommodities.length} commodity(ies) or ${pickedVendors.length} vendor(s) picked — an item is in the count if it matches any one of them. Everything else at the branch is left out entirely.`
                 : "Counting everything the branch holds."}
             </p>
           </div>
@@ -330,7 +376,7 @@ export default function SuperviseTab({ locations, location, sessions, onSessions
             Either threshold sends an item back for a recount by a different person. Expected quantities are recorded now, so sales during the count do not read as shortfalls.
           </p>
           <button
-            onClick={() => create.mutate({ ...form, categories: pickedCategories, commodities: pickedCommodities, threshold_qty: Number(form.threshold_qty), threshold_value: Number(form.threshold_value) })}
+            onClick={() => create.mutate({ ...form, categories: pickedCategories, commodities: pickedCommodities, vendors: pickedVendors, threshold_qty: Number(form.threshold_qty), threshold_value: Number(form.threshold_value) })}
             disabled={create.isPending}
             className="w-full rounded-md border border-sky-500 bg-sky-500/15 px-3 py-2 text-sm font-medium text-sky-300 disabled:opacity-50"
           >
@@ -346,12 +392,13 @@ export default function SuperviseTab({ locations, location, sessions, onSessions
         </div>
       )}
 
-      {(session?.categories || session?.commodities) && (
+      {(session?.categories || session?.commodities || session?.vendors) && (
         <p className="text-xs text-muted-foreground">
           This count covers{" "}
           {[
             ...(session.categories ? JSON.parse(session.categories) : []),
             ...(session.commodities ? JSON.parse(session.commodities).map((c) => `commodity ${c}`) : []),
+            ...(session.vendors ? JSON.parse(session.vendors).map((v) => `vendor ${v}`) : []),
           ].join(", ")}{" "}
           only. Anything outside that is not part of the count and will not show as missing.
         </p>
