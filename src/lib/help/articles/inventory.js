@@ -138,4 +138,60 @@ export const inventoryArticles = [
       },
     ],
   },
+  {
+    slug: "stock-take-barcodes",
+    title: "Stock take: the barcode map",
+    summary: "Scan a barcode on a phone to see what an item is, and teach the system barcodes it has not met.",
+    category: "inventory",
+    audience: "everyone",
+    keywords: ["stock take", "stocktake", "barcode", "scan", "scanner", "count", "phone", "camera", "pack size", "carton"],
+    body: [
+      {
+        type: "p",
+        text: "Sage has no barcode field, so the link between a barcode and an item is kept in this app. **Stock Take** is where that map is built and used. Nothing on this screen changes anything in Sage — it only reads from it.",
+      },
+      { type: "h", text: "Before you start" },
+      {
+        type: "list",
+        items: [
+          "Pick your **Location** at the top. On-hand figures and the item search are for that branch.",
+          "If the screen says the item list has never been loaded, tap **Refresh item list** to read the items and their pack sizes from Sage.",
+          "The header shows how much of the stock is covered, for example \"312 of 989 items holding stock\".",
+        ],
+      },
+      { type: "h", text: "Scanning" },
+      {
+        type: "list",
+        items: [
+          "**A Bluetooth scanner** types straight into the box and needs no taps at all — the box takes the focus back after every action.",
+          "**The phone camera** works through the **Camera** button on Android phones and on desktop Chrome or Edge. iPhones cannot read barcodes from the camera, and the camera needs the site to be on a secure (https) address. When either is missing the screen says so and you use the scanner or type the number.",
+          "**Typing** the number printed under the bars always works.",
+        ],
+      },
+      { type: "h", text: "When the barcode is known" },
+      {
+        type: "p",
+        text: "You get the item, its description, what the barcode means (**1 CARTON = 10 EACH**), the quantity on hand in both the stocking unit and the scanned pack size, and the average cost. You can re-point the barcode to a different item or pack size, or remove it.",
+      },
+      { type: "h", text: "When the barcode is new" },
+      {
+        type: "steps",
+        items: [
+          "Search for the item by number or description. Items the branch actually holds are listed first.",
+          "Choose the item, then choose the **pack size** the barcode sits on.",
+          "The mapping is saved against your name, and the next person who scans that label gets the answer straight away.",
+        ],
+      },
+      {
+        type: "callout",
+        tone: "warning",
+        text: "The pack size is the part that matters. A carton and a single carry different barcodes and must be mapped to different units — counting a carton as a single is wrong by the whole carton, and that error works its way into stock value and cost.",
+      },
+      {
+        type: "callout",
+        tone: "info",
+        text: "A label read by a camera and the same label read by a laser scanner can come back as 12 or 13 digits. Both forms are treated as the same barcode, so you never have to map a label twice.",
+      },
+    ],
+  },
 ];
