@@ -34,6 +34,7 @@ import { createSageCorrectionsRouter } from './src/routes/sageCorrections.js';
 import { createInventoryMovementRouter } from './src/routes/inventoryMovement.js';
 import { createStockReceiptRouter } from './src/routes/stockReceipts.js';
 import { createStockTakeRouter } from './src/routes/stockTake.js';
+import { createStockTakeCountRouter } from './src/routes/stockTakeCount.js';
 import { createCreditorRouter } from './src/routes/creditors.js';
 import { createDebtorRouter } from './src/routes/debtors.js';
 import { createPricingRouter } from './src/routes/pricing.js';
@@ -247,6 +248,7 @@ app.use(createInventoryMovementRouter({ requireAuth, requireAdmin, requirePermis
 // hub gets read-only list endpoints querying hub_stock_receipt_expiry.
 app.use(createStockReceiptRouter({ requireAuth, requirePermission }));
 app.use(createStockTakeRouter({ requireAuth, requirePermission }));
+app.use(createStockTakeCountRouter({ requireAuth, requirePermission }));
 
 // Creditors module — vendor master + AP transactions + POs synced
 // from Sage. Mounted on both modes; hub branches in the router itself

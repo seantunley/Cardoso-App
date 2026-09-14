@@ -23,6 +23,11 @@ function isHub() { return process.env.HUB_MODE === 'true'; }
 
 const HUB_MESSAGE = 'Stock take runs at the branch, not on the hub. Open it on the site that is counting.';
 
+/** Supervisors see expected quantities and cost. Counters deliberately do not. */
+function isSupervisor(req) {
+  return req.currentUser?.role === 'admin' || Boolean(req.currentUser?.can_supervise_stock_take);
+}
+
 export function createStockTakeRouter({ requireAuth, requirePermission }) {
   const router = Router();
   const guard = [requireAuth, requirePermission('can_access_stock_take')];
@@ -57,7 +62,21 @@ export function createStockTakeRouter({ requireAuth, requirePermission }) {
     const barcode = String(req.query.barcode || '').trim();
     if (!barcode) return res.status(400).json({ error: 'No barcode was sent to look up.' });
     try {
-      res.json(lookupBarcode({ barcode, location: String(req.query.location || '') }));
+      const result = lookupBarcode({ barcode, location: String(req.query.location || '') });
+      // Blind counting, enforced here rather than only on the screen: anyone
+      // without the supervisor permission never receives the expected quantity
+      // or the cost. A counter who can see "expected 340" hands back 340.
+      if (!isSupervisor(req) && result.found) {
+        return res.json({
+          ...result,
+          qty_on_hand: null,
+          qty_on_hand_in_unit: null,
+          average_cost: null,
+          quantities_hidden: true,
+          quantities_hidden_reason: 'Counts are blind: expected quantities and cost are only shown to a stock take supervisor.',
+        });
+      }
+      res.json(result);
     } catch (err) {
       res.status(500).json({ error: `Could not look up barcode ${barcode}: ${err.message}` });
     }

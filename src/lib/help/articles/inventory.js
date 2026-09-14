@@ -194,4 +194,77 @@ export const inventoryArticles = [
       },
     ],
   },
+  {
+    slug: "stock-take-counting",
+    title: "Running a stock count",
+    summary: "Zones, blind counting, recounts and the variance report.",
+    category: "inventory",
+    audience: "everyone",
+    keywords: ["stock take", "stocktake", "count", "counting", "zone", "aisle", "recount", "variance", "shortfall", "supervisor", "blind"],
+    body: [
+      {
+        type: "p",
+        text: "A count is opened by a supervisor, counted by whoever is on the floor, and ends in a variance report. **Nothing is written back to Sage.** The report says what is short and what is over; a person keys any correction in Sage.",
+      },
+      { type: "h", text: "Opening a count (supervisor)" },
+      {
+        type: "steps",
+        items: [
+          "On the **Supervise** tab, choose **Open a count**, name it, and pick the branch.",
+          "Set the two recount thresholds: how far out in **units**, and how far out in **rand**. Either one sends an item back for a recount.",
+          "Opening the count records what Sage expected at that moment. Sales made while people are counting therefore do not show up as shortfalls.",
+        ],
+      },
+      {
+        type: "callout",
+        tone: "info",
+        text: "Only one count can be open per branch at a time. Two counts over the same shelves would fight.",
+      },
+      { type: "h", text: "Counting" },
+      {
+        type: "steps",
+        items: [
+          "On the **Count** tab, type the aisle or shelf you are about to count — anything you like, such as \"Aisle 3\" or \"Shelf B cold room\" — and press **Start**.",
+          "Scan an item. The screen shows what it is; enter how many you counted and press **Add**.",
+          "Keep going. Every scan is saved on the phone first and sent afterwards, so a dead spot in the warehouse costs you nothing.",
+          "When the aisle is done, press **Hand in**.",
+        ],
+      },
+      {
+        type: "callout",
+        tone: "warning",
+        text: "One person per zone. If two people count the same rack, the two counts are added together and it reads as a surplus that is not there.",
+      },
+      {
+        type: "list",
+        items: [
+          "**You will not see what Sage expects.** That is deliberate — a counter who can see the expected number tends to hand it back. Only a supervisor sees expected quantities, cost and variance.",
+          "**A barcode that is not on the map still counts.** Enter the quantity anyway; it is held against the barcode and the supervisor sorts out which item it was.",
+          "**Undo** takes a scan back. If it has already been sent it stays in the record, marked as taken back, so the trail is honest.",
+          "A badge shows anything **waiting** to be sent. The zone cannot be handed in until it has all gone.",
+        ],
+      },
+      { type: "h", text: "Recounts" },
+      {
+        type: "p",
+        text: "Any item further out than a threshold has to be counted again, **by someone else**. Tick **This is a recount** to see the list and enter the second count. The system refuses a recount from the person who counted it the first time. Where a recount exists it is the count that stands, and the first figure is kept alongside it so the supervisor can see the two numbers that disagreed.",
+      },
+      { type: "h", text: "The variance report (supervisor)" },
+      {
+        type: "list",
+        items: [
+          "**Needs recount** — over a threshold and not yet counted a second time.",
+          "**Differences** — everything where counted and expected do not agree.",
+          "**Never counted** — stock Sage expects that nobody found. Usually the most important list on the page.",
+          "**Not expected here** — counted, but Sage has no stock of it at this branch.",
+          "Differences are valued at what the stock was carried at when the count opened. **CSV** downloads whatever the current filter shows.",
+        ],
+      },
+      {
+        type: "callout",
+        tone: "warning",
+        text: "Closing a count locks it. If zones are still out or recounts are outstanding you are warned and have to confirm, and what was outstanding is written into the count's record.",
+      },
+    ],
+  },
 ];

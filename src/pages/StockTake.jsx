@@ -4,6 +4,8 @@ import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { Barcode, Camera, RefreshCw, Search, Trash2, AlertTriangle, CheckCircle2, Info } from "lucide-react";
 import { toast } from "sonner";
 import BarcodeScanner, { cameraUnavailableReason } from "@/components/inventory/BarcodeScanner";
+import CountTab from "@/components/inventory/stocktake/CountTab";
+import SuperviseTab from "@/components/inventory/stocktake/SuperviseTab";
 
 // Stock Take — the barcode map.
 //
@@ -66,7 +68,7 @@ function Banner({ tone = "info", icon: Icon = Info, children }) {
 
 export default function StockTake() {
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState("scan");
+  const [tab, setTab] = useState("count");
   const [location, setLocation] = useState(() => {
     try { return localStorage.getItem(LOCATION_KEY) || ""; } catch { return ""; }
   });
@@ -87,6 +89,14 @@ export default function StockTake() {
 
   const meta = useQuery({ queryKey: ["stock-take-meta"], queryFn: () => apiFetch("/api/stock-take/meta") });
   const hubMode = meta.data?.hub === true;
+
+  const sessionsQuery = useQuery({
+    queryKey: ["stock-take-sessions"],
+    queryFn: () => apiFetch("/api/stock-take/sessions"),
+    enabled: !hubMode,
+    refetchInterval: 30_000,
+  });
+  const canSupervise = sessionsQuery.data?.can_supervise === true;
 
   // Default the location to the only one, or the first, once the list arrives.
   useEffect(() => {
@@ -267,7 +277,12 @@ export default function StockTake() {
       )}
 
       <div className="mb-3 flex gap-2">
-        {[["scan", "Scan"], ["map", `Map (${num(meta.data?.barcodes_mapped)})`]].map(([key, label]) => (
+        {[
+          ["count", "Count"],
+          ["scan", "Look up"],
+          ["map", `Map (${num(meta.data?.barcodes_mapped)})`],
+          ...(canSupervise ? [["supervise", "Supervise"]] : []),
+        ].map(([key, label]) => (
           <button
             key={key}
             onClick={() => setTab(key)}
@@ -279,6 +294,21 @@ export default function StockTake() {
           </button>
         ))}
       </div>
+
+      {tab === "count" && (
+        <CountTab
+          sessions={sessionsQuery.data?.sessions || []}
+          onNeedSessions={() => sessionsQuery.refetch()}
+        />
+      )}
+
+      {tab === "supervise" && canSupervise && (
+        <SuperviseTab
+          locations={meta.data?.locations || []}
+          sessions={sessionsQuery.data?.sessions || []}
+          onSessionsChanged={() => sessionsQuery.refetch()}
+        />
+      )}
 
       {tab === "scan" && (
         <div className="space-y-3">
