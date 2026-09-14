@@ -60,6 +60,17 @@ export default function AgedDebtors() {
     staleTime: 60_000,
   });
 
+  // How old the underlying AR pull is. Shown always — not only when stale —
+  // because the useful habit is checking the time before comparing totals, and
+  // a label that only appears sometimes does not build that habit.
+  const arSyncedAt = data?.ar_synced_at || null;
+  const syncAgeHours = arSyncedAt
+    ? (Date.now() - new Date(String(arSyncedAt).replace(' ', 'T')).getTime()) / 3_600_000
+    : null;
+  const syncTone = syncAgeHours == null ? 'unknown'
+    : syncAgeHours >= 24 ? 'stale'
+      : syncAgeHours >= 8 ? 'ageing' : 'fresh';
+
   const records = data?.records || [];
   const summary = data?.summary;
   const filters = data?.filters || { sites: [], sales_reps: [], account_types: [] };
@@ -211,6 +222,25 @@ export default function AgedDebtors() {
             <SummaryTile label="1–7 days" value={<><span className="text-muted-subtle mr-1">R</span>{fmtRSigned(summary.buckets['1-7'])}</>} sub={`${summary.bucket_counts['1-7']} cust`} accent={BUCKET_META['1-7'].color} />
             <SummaryTile label="8–14 days" value={<><span className="text-muted-subtle mr-1">R</span>{fmtRSigned(summary.buckets['8-14'])}</>} sub={`${summary.bucket_counts['8-14']} cust`} accent={BUCKET_META['8-14'].color} />
             <SummaryTile label="Over 21 days" value={<><span className="text-muted-subtle mr-1">R</span>{fmtRSigned(summary.buckets['over-21'])}</>} sub={`${summary.bucket_counts['over-21']} cust`} accent={BUCKET_META['over-21'].color} />
+          </div>
+
+          {/* What moment these figures describe. */}
+          <div
+            className={`report-print-hide mt-2 text-xs ${
+              syncTone === 'stale' ? 'text-[hsl(var(--status-critical))]'
+                : syncTone === 'ageing' ? 'text-[hsl(var(--status-warning))]'
+                  : 'text-muted-subtle'
+            }`}
+          >
+            {arSyncedAt ? (
+              <>
+                Open items last read from Sage <strong>{arSyncedAt}</strong>
+                {syncAgeHours != null && ` · ${syncAgeHours < 1 ? 'less than an hour' : `${Math.round(syncAgeHours)} hour${Math.round(syncAgeHours) === 1 ? '' : 's'}`} ago`}
+                {syncTone !== 'fresh' && ' — invoices and receipts posted since are not in these figures. Sync in Settings for the current position.'}
+              </>
+            ) : (
+              <>Open items have never been read from Sage — run the debtors sync in Settings.</>
+            )}
           </div>
 
           {/* Charts (screen only) */}
