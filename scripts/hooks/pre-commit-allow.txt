@@ -1,0 +1,18 @@
+# Lines the pre-commit datetime guard is allowed to let through.
+#
+# The guard blocks bare datetime('now') because SQLite returns UTC for it and
+# this project stores SAST. Almost always the fix is now_local(). This file is
+# for the rare case where UTC is genuinely what you want — a comparison against
+# an external system, or a test that is checking the difference itself.
+#
+# One entry per line. Blank lines and lines starting with # are ignored.
+#
+#   path/to/file.js                       the whole file is exempt
+#   path/to/file.js::exact code line      only that line, trimmed, is exempt
+#
+# Prefer the second form. Exempting a whole file means the next person to add a
+# timestamp there gets no warning at all, which is how the rule quietly rots.
+#
+# There is no line number in an entry on purpose: line numbers move the moment
+# somebody edits above them, and an allow-list that silently stops matching is
+# worse than no allow-list.
