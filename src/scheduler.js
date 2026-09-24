@@ -675,6 +675,25 @@ export function startSchedulers() {
       registerJob({ name: 'debtors-sync', type: 'cron', cronExpression: '45 4 * * *', taskRef: t, mode: 'site', description: 'Nightly debtors AR open-item sync from Sage AROBL (retries twice on failure)' });
     }
 
+    // Debtors, again, through the working day.
+    //
+    // The 04:45 pull is a photograph taken before anyone is in. By mid-afternoon
+    // a branch has invoiced and receipted millions against it — Johannesburg
+    // moved R3m in a single day — so the Aged Debtors screen can sit hours
+    // behind the ledger while Customer Balances, which syncs on demand, is
+    // current. Two screens, same building, different answers, and nothing on
+    // either saying why.
+    //
+    // Every three hours from 08:00 to 17:00 keeps it close without hammering
+    // Sage: the pull is one query and a delete/refresh of ~12k rows. It reuses
+    // the same runner as the nightly job, so the overlap guard applies and a
+    // sync already in flight is never started twice.
+    {
+      const t = cron.schedule('0 8-17/3 * * *', debtorsRunner);
+      cronTasks.push(t);
+      registerJob({ name: 'debtors-sync-intraday', type: 'cron', cronExpression: '0 8-17/3 * * *', taskRef: t, mode: 'site', description: 'Daytime refresh (08:00, 11:00, 14:00, 17:00) of the debtors AR open-item ledger, so Aged Debtors is not reading a figure taken before the branch opened' });
+    }
+
     // Boot catch-up — the other half of the stale-data problem: if the
     // machine is off or asleep at the 4am window, node-cron simply never
     // fires. No failed run is recorded, nothing retries, and the data ages
