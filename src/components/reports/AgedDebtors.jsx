@@ -230,7 +230,8 @@ export default function AgedDebtors() {
             className={`report-print-hide mt-2 text-xs ${
               syncTone === 'stale' ? 'text-[hsl(var(--status-critical))]'
                 : syncTone === 'ageing' ? 'text-[hsl(var(--status-warn))]'
-                  : 'text-[hsl(var(--status-ok))]'
+                  : syncTone === 'fresh' ? 'text-[hsl(var(--status-ok))]'
+                    : 'text-muted-subtle'
             }`}
           >
             {arSyncedAt ? (
