@@ -85,6 +85,17 @@ const IconPriceList = ({ className, style }) => (
   </svg>
 );
 
+const IconStockTake = ({ className, style }) => (
+  <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
+    <rect x="2.5" y="5" width="15" height="10" rx="1.5" fill="#0ea5e9" opacity="0.65"/>
+    <rect x="5" y="7" width="1" height="6" rx="0.4" fill="#e0f2fe"/>
+    <rect x="7" y="7" width="1.6" height="6" rx="0.4" fill="#e0f2fe"/>
+    <rect x="9.6" y="7" width="0.9" height="6" rx="0.4" fill="#e0f2fe"/>
+    <rect x="11.5" y="7" width="1.6" height="6" rx="0.4" fill="#e0f2fe"/>
+    <rect x="14" y="7" width="1" height="6" rx="0.4" fill="#e0f2fe"/>
+  </svg>
+);
+
 const IconStockExpiry = ({ className, style }) => (
   <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
     <rect x="3" y="4" width="10" height="13" rx="1.5" fill="#fb923c" opacity="0.7"/>
@@ -370,6 +381,7 @@ const navItems = [
   { name: "Inventory List",      icon: IconInventory,             page: "Inventory",        permission: "can_access_inventory", group: "Inventory" },
   { name: "Inventory Movement",  icon: IconInventoryMovement,     page: "InventoryMovement", permission: "can_access_inventory_movement", group: "Inventory" },
   { name: "Stock Expiry",        icon: IconStockExpiry,           page: "StockReceipts",    permission: "can_access_stock_receipt_expiry", group: "Inventory" },
+  { name: "Stock Take",          icon: IconStockTake,             page: "StockTake",        permission: "can_access_stock_take", siteOnly: true, group: "Inventory" },
   { name: "Price List",          icon: IconPriceList,             page: "PriceList",        permission: "can_access_price_list", siteOnly: true, group: "Inventory" },
   { name: "BAT Reconciliation",  icon: IconReconciliationCompare, page: "HubReconciliation",permission: "can_access_hub_reconciliation", hubOnly: true, group: "BAT and JTI" },
   { name: "BAT Reconciliation",  icon: IconReconciliationCompare, page: "Reconciliation",   permission: "can_access_reconciliation", siteOnly: true, group: "BAT and JTI" },
