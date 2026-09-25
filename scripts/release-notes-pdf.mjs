@@ -1983,15 +1983,15 @@ const RELEASES = {
           {
             title: 'Aged Debtors shows data freshness and syncs during the day',
             body:
-              "The Aged Debtors screen now displays a colour-coded freshness " +
-              "label below the summary tiles showing exactly when the open-item " +
-              "ledger was last read from Sage — green when current (under 8 hours), " +
-              "amber after that, and red if the data is significantly stale. A note " +
-              "makes clear that amounts posted since the last read are not yet in the " +
-              "figures, so the totals are never mistaken for live balances. " +
-              "The ledger now also syncs at 08:00, 11:00, 14:00 and 17:00 in " +
-              "addition to the overnight run, reducing the gap between Sage and " +
-              "the screen to a matter of hours during the working day.",
+              "The Aged Debtors screen now always displays when the open-item " +
+              "ledger was last read from Sage, in a colour-coded label below the " +
+              "summary tiles — green when current (under 8 hours old), amber as it " +
+              "ages, and red when significantly stale. When the data is more than " +
+              "8 hours old, the label also notes that invoices and receipts posted " +
+              "since are not yet in the figures, so the totals are never silently " +
+              "mistaken for a live balance. The ledger now also syncs at 08:00, " +
+              "11:00, 14:00 and 17:00 in addition to the overnight run, keeping " +
+              "the debtors book current throughout the working day.",
           },
         ],
       },

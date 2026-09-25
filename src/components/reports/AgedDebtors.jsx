@@ -183,8 +183,9 @@ export default function AgedDebtors() {
           <FilterField label="Site" value={site} onChange={setSite} options={[{ value: 'all', label: 'All sites' }, ...filters.sites.map(s => ({ value: s, label: s }))]} />
         )}
         <div>
-          <label className="block font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-1">Min Balance (R)</label>
+          <label htmlFor="filter-min-balance" className="block font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-1">Min Balance (R)</label>
           <input
+            id="filter-min-balance"
             type="number" min={0} step={1} value={minBalance}
             onChange={(e) => setMinBalance(parseFloat(e.target.value) || 0)}
             className="w-full bg-background border border-border text-foreground px-2 py-1.5 text-xs tabular-nums outline-none focus:border-accent"
@@ -228,8 +229,8 @@ export default function AgedDebtors() {
           <div
             className={`report-print-hide mt-2 text-xs ${
               syncTone === 'stale' ? 'text-[hsl(var(--status-critical))]'
-                : syncTone === 'ageing' ? 'text-[hsl(var(--status-warning))]'
-                  : 'text-muted-subtle'
+                : syncTone === 'ageing' ? 'text-[hsl(var(--status-warn))]'
+                  : 'text-[hsl(var(--status-ok))]'
             }`}
           >
             {arSyncedAt ? (

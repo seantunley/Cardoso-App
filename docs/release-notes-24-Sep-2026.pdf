@@ -10,7 +10,7 @@
 endobj
 4 0 obj
 <<
-/Length 3355
+/Length 3357
 >>
 stream
 0.5670000000000001 w
@@ -94,13 +94,13 @@ BT
 10.9249999999999989 TL
 0.353 0.392 0.451 rg
 62.3622047244094517 616.2522047244094665 Td
-(The Aged Debtors screen now displays a colour-coded freshness label below the summary tiles) Tj
-T* (showing exactly when the open-item ledger was last read from Sage — green when current) Tj
-T* (\(under 8 hours\), amber after that, and red if the data is significantly stale. A note makes clear) Tj
-T* (that amounts posted since the last read are not yet in the figures, so the totals are never) Tj
-T* (mistaken for live balances. The ledger now also syncs at 08:00, 11:00, 14:00 and 17:00 in) Tj
-T* (addition to the overnight run, reducing the gap between Sage and the screen to a matter of) Tj
-T* (hours during the working day.) Tj
+(The Aged Debtors screen now always displays when the open-item ledger was last read from) Tj
+T* (Sage, in a colour-coded label below the summary tiles — green when current \(under 8 hours) Tj
+T* (old\), amber as it ages, and red when significantly stale. When the data is more than 8 hours old,) Tj
+T* (the label also notes that invoices and receipts posted since are not yet in the figures, so the) Tj
+T* (totals are never silently mistaken for a live balance. The ledger now also syncs at 08:00, 11:00,) Tj
+T* (14:00 and 17:00 in addition to the overnight run, keeping the debtors book current throughout) Tj
+T* (the working day.) Tj
 ET
 0.87 0.89 0.91 RG
 0.8503937007874016 w
@@ -293,7 +293,7 @@ endobj
 19 0 obj
 <<
 /Producer (jsPDF 4.2.1)
-/CreationDate (D:20260925061315-00'00')
+/CreationDate (D:20260925061708-00'00')
 >>
 endobj
 20 0 obj
@@ -307,33 +307,33 @@ endobj
 xref
 0 21
 0000000000 65535 f 
-0000003559 00000 n 
-0000005376 00000 n 
+0000003561 00000 n 
+0000005378 00000 n 
 0000000015 00000 n 
 0000000152 00000 n 
-0000003616 00000 n 
-0000003741 00000 n 
-0000003871 00000 n 
-0000004004 00000 n 
-0000004141 00000 n 
-0000004264 00000 n 
-0000004393 00000 n 
-0000004525 00000 n 
-0000004661 00000 n 
-0000004789 00000 n 
-0000004916 00000 n 
-0000005045 00000 n 
-0000005178 00000 n 
-0000005280 00000 n 
-0000005624 00000 n 
-0000005710 00000 n 
+0000003618 00000 n 
+0000003743 00000 n 
+0000003873 00000 n 
+0000004006 00000 n 
+0000004143 00000 n 
+0000004266 00000 n 
+0000004395 00000 n 
+0000004527 00000 n 
+0000004663 00000 n 
+0000004791 00000 n 
+0000004918 00000 n 
+0000005047 00000 n 
+0000005180 00000 n 
+0000005282 00000 n 
+0000005626 00000 n 
+0000005712 00000 n 
 trailer
 <<
 /Size 21
 /Root 20 0 R
 /Info 19 0 R
-/ID [ <D9E48272A7623DFB840B17814344DEE9> <D9E48272A7623DFB840B17814344DEE9> ]
+/ID [ <5BCDBEA296567FD1E4CAE215A66687F5> <5BCDBEA296567FD1E4CAE215A66687F5> ]
 >>
 startxref
-5814
+5816
 %%EOF
