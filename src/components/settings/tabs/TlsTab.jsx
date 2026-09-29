@@ -225,7 +225,12 @@ export default function TlsTab() {
   const PostureIcon = posture.icon;
 
   const isWindows = data.platform === 'win32';
-  const canRenew = isWindows && data.posture === 'tls_fronted' && data.caddyfile?.hostname;
+  // Deliberately NOT gated on posture. Renewal is what you reach for when
+  // TLS is already degraded, and requiring posture==='tls_fronted' disabled
+  // the button on exactly the hubs that needed it (a hub serving an expired
+  // cert reads as 'partial' or 'http_lan_only'). The endpoint itself only
+  // needs a hostname it can read out of the Caddyfile, so match that.
+  const canRenew = isWindows && Boolean(data.caddyfile?.hostname);
 
   return (
     <div className="space-y-6 max-w-3xl">
@@ -294,6 +299,7 @@ export default function TlsTab() {
             <>
               <Row label="Path" value={data.caddyfile.path} mono />
               <Row label="Hostname" value={data.caddyfile.hostname || '—'} mono />
+              <Row label="Listen port" value={data.caddyfile.listen_port ?? '—'} mono />
               <Row label="Backend port" value={data.caddyfile.backend_port ?? '—'} mono />
             </>
           )}
@@ -369,7 +375,7 @@ export default function TlsTab() {
             variant="outline"
             onClick={handleRenew}
             disabled={renewing || !canRenew}
-            title={!canRenew ? 'Renewal requires a fully TLS-fronted Hub with a Caddyfile hostname.' : undefined}
+            title={!canRenew ? `Renewal needs a hostname in ${data.caddyfile?.path || 'the Caddyfile'} — none could be read, so there is nothing to re-issue a cert for.` : undefined}
           >
             <RefreshCw className={cn("h-3.5 w-3.5 mr-1.5", renewing && "animate-spin")} />
             {renewing ? 'Renewing…' : 'Renew cert now'}
