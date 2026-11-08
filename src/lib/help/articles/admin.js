@@ -105,4 +105,71 @@ export const adminArticles = [
       },
     ],
   },
+  {
+    slug: "customer-sync",
+    title: "How customer data stays in sync with Sage",
+    summary: "When customers sync, what each sync result means, and what to do when a sync is failing.",
+    category: "admin",
+    audience: "admins",
+    keywords: ["sync", "sync now", "sync all", "connection", "sage", "customers", "balances", "stale", "alert", "timeout", "national account"],
+    body: [
+      {
+        type: "p",
+        text: "Customer balances, aging and open invoices come from Sage through the site's customer connection (Settings → Data → Connections). The app copies them in on a schedule; nothing is ever written back to Sage.",
+      },
+      { type: "h", text: "When it syncs" },
+      {
+        type: "list",
+        items: [
+          "Every 30 minutes on weekdays from 06:00 to 16:30, plus an end-of-day sync at 17:00.",
+          "A connection with its own sync interval also syncs whenever that interval has passed.",
+          "**Sync now** on a connection runs it straight away; **Sync all** runs every connection that can be synced. BAT-only and switched-off connections are skipped.",
+        ],
+      },
+      { type: "h", text: "Reading a sync result" },
+      {
+        type: "p",
+        text: "Each sync reports what actually changed, for example: \"Synced 6 590 customer rows from Sage: 3 new, 120 updated, 6 467 unchanged, 2 no longer in Sage (balances cleared).\" The same line is kept in the sync history and the audit log.",
+      },
+      {
+        type: "table",
+        headers: ["Term", "Meaning"],
+        rows: [
+          ["New", "Customers that weren't in the app yet."],
+          ["Updated", "Customers whose balance, aging or details changed in Sage."],
+          ["Unchanged", "Customers that were checked and are already up to date."],
+          ["No longer in Sage", "Customers Sage stopped returning — deleted in Sage, or rolled into a national account (whose row now carries the balance). Their balance, aging and open invoices are cleared so totals match Sage; the customer, flags and notes are kept. If they come back, the next sync fills them in again."],
+          ["Duplicate rows skipped", "Sage returned the same customer more than once; it's counted once."],
+        ],
+      },
+      {
+        type: "callout",
+        tone: "info",
+        text: "Safety check: if Sage suddenly returns far fewer customers than last time, the app does not clear anyone on that run and says why. That usually means the sync query or Sage needs checking. If Sage keeps returning the lower number, the next sync accepts it.",
+      },
+      { type: "h", text: "When a sync fails" },
+      {
+        type: "list",
+        items: [
+          "Brief hiccups — a timeout or a dropped connection to Sage — are retried automatically twice within the same sync before it gives up.",
+          "A connection whose sync failed shows the error on its card and is retried automatically every 30 minutes until it succeeds. You don't need to press anything for it to recover.",
+          "If a sync is already running when you press **Sync now**, you'll be told to try again in a minute rather than starting a second one.",
+        ],
+      },
+      {
+        type: "p",
+        text: "If a customer connection hasn't synced successfully for 2 hours during working hours (Mon–Fri 08:00–18:00), an alert appears in the notifications bell and under Operations → health panel → Active alerts, with the last error. It clears itself after the next successful sync.",
+      },
+      {
+        type: "steps",
+        items: [
+          "Open the alert or the connection card and read the last error.",
+          "\"SQL Server didn't respond in time\" or similar: check that the Sage server is on and reachable from this machine (network / VPN).",
+          "\"Login failed\": the connection's username or password has changed — update it under Settings → Data → Connections.",
+          "No error but still stale: check that the Cardoso service is running on this machine.",
+          "Press **Sync now** to confirm it's fixed.",
+        ],
+      },
+    ],
+  },
 ];
