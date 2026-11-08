@@ -28,6 +28,10 @@ const stmts = buildStatements(db);
 // runConnectionImport happens long after migrations complete, and each
 // statement is then cached for the lifetime of the process.
 const _syncStmts = {};
+
+// Customers written per transaction in the customer sync; the event loop is
+// handed back between batches so the server stays responsive.
+const SYNC_WRITE_BATCH = 200;
 function getSyncStmt(key) {
   if (_syncStmts[key]) return _syncStmts[key];
   _syncStmts[key] = db.prepare(_SYNC_SQL[key]);
@@ -291,36 +295,42 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
     // kept around (no destructive migration) but is no longer written to.
 
     // Shared write-rows helper used by both query mode and legacy table mode
-    const runWriteRows = (rows, sourceName, mappings, indexField) => {
-      // Keyed lookup — load only source_ids from incoming rows, not full table
-      const incomingIds = rows
-        .map((row) => String(firstDefined(getMappedOrFallbackValue(row, mappings, 'customer_number', [indexField, 'id']), row[indexField], row.id, '')).trim())
-        .filter(Boolean);
-
+    const runWriteRows = async (rows, sourceName, mappings, indexField) => {
+      // Keyed lookup — load only this batch's source_ids, not the full table.
+      // Runs INSIDE each batch's transaction (see writeRowsTransaction), so the
+      // existing values a batch writes back (flags, notes…) are read in the same
+      // synchronous step — a user edit made between batches is never clobbered.
       const existingMap = new Map();
       const customerNumberMap = new Map();
-      if (incomingIds.length > 0) {
-        // Deduplicate incoming IDs to avoid excessive SQL placeholders
-        const uniqueIds = [...new Set(incomingIds)];
-        const placeholders = uniqueIds.map(() => '?').join(',');
-        const keyedRows = db.prepare(`
-          SELECT id, created_by, source_id, source_table, customer_number, customer_name,
-                 age_analysis, age_current, age_7_days, age_14_days, age_21_days,
-                 note, local_fields, flag_color, flag_reason, flag_created_by, data,
-                 outstanding_balance, terms, sales_rep, account_type, unpaid_invoices, receipts
-          FROM datarecord
-          WHERE source_table = ? AND (
-            TRIM(source_id) IN (${placeholders})
-            OR TRIM(customer_number) IN (${placeholders})
-          )
-        `).all(sourceName, ...uniqueIds, ...uniqueIds);
-        for (const r of keyedRows) {
-          // Index by both keys so the per-row fallbacks below become Map
-          // hits instead of full table scans (TRIM(...) is non-sargable).
-          if (r.source_id) existingMap.set(`${r.source_table}::${String(r.source_id).trim()}`, r);
-          if (r.customer_number) customerNumberMap.set(String(r.customer_number).trim(), r);
+      const loadExisting = (batch) => {
+        existingMap.clear();
+        customerNumberMap.clear();
+        const incomingIds = batch
+          .map((row) => String(firstDefined(getMappedOrFallbackValue(row, mappings, 'customer_number', [indexField, 'id']), row[indexField], row.id, '')).trim())
+          .filter(Boolean);
+        if (incomingIds.length > 0) {
+          // Deduplicate incoming IDs to avoid excessive SQL placeholders
+          const uniqueIds = [...new Set(incomingIds)];
+          const placeholders = uniqueIds.map(() => '?').join(',');
+          const keyedRows = db.prepare(`
+            SELECT id, created_by, source_id, source_table, customer_number, customer_name,
+                   age_analysis, age_current, age_7_days, age_14_days, age_21_days,
+                   note, local_fields, flag_color, flag_reason, flag_created_by, data,
+                   outstanding_balance, terms, sales_rep, account_type, unpaid_invoices, receipts
+            FROM datarecord
+            WHERE source_table = ? AND (
+              TRIM(source_id) IN (${placeholders})
+              OR TRIM(customer_number) IN (${placeholders})
+            )
+          `).all(sourceName, ...uniqueIds, ...uniqueIds);
+          for (const r of keyedRows) {
+            // Index by both keys so the per-row fallbacks below become Map
+            // hits instead of full table scans (TRIM(...) is non-sargable).
+            if (r.source_id) existingMap.set(`${r.source_table}::${String(r.source_id).trim()}`, r);
+            if (r.customer_number) customerNumberMap.set(String(r.customer_number).trim(), r);
+          }
         }
-      }
+      };
 
       const syncTimestamp = new Date().toISOString();
 
@@ -343,6 +353,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
       let syncSkipped = 0; // existing rows whose data was unchanged (SYNC-2 no-op skip)
       const seenSourceIds = new Set();
       const writeRowsTransaction = db.transaction((rowsToWrite) => {
+        loadExisting(rowsToWrite);
         for (const row of rowsToWrite) {
           const sourceId = String(
             firstDefined(
@@ -553,7 +564,17 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
         }
       });
 
-      writeRowsTransaction(rows);
+      // Small transactions with a yield between them. One transaction over every
+      // customer (~7k rows, each JSON-stringified, parsed and rule-checked) held
+      // the event loop for seconds and is a likely cause of 15-30s freezes.
+      // Trade-off (approved): mid-sync, some customers may show new data and
+      // others old for a few seconds.
+      for (let i = 0; i < rows.length; i += SYNC_WRITE_BATCH) {
+        const done = trackOp(`customer-sync ${sourceName} ${Math.min(i + SYNC_WRITE_BATCH, rows.length)}/${rows.length}`);
+        try { writeRowsTransaction(rows.slice(i, i + SYNC_WRITE_BATCH)); }
+        finally { done(); }
+        await new Promise((resolve) => setImmediate(resolve));
+      }
       console.log(`[sync-stats] ${sourceName}: ${rows.length} incoming rows, ${seenSourceIds.size} unique, ${syncUpdated} updated, ${syncInserted} inserted, ${syncSkipped} unchanged (no-op), ${rows.length - seenSourceIds.size} duplicate rows skipped`);
     };
     if (syncQuery) {
@@ -629,7 +650,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
           pruneViaTempTable(freshItemNumbers);
         }
       } else {
-        runWriteRows(rows, sourceName, queryFieldMappings, queryIndexField);
+        await runWriteRows(rows, sourceName, queryFieldMappings, queryIndexField);
       }
       importedCount = rows.length;
     } else {
@@ -674,7 +695,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
         if (configRecordType === 'inventory') {
           runInventoryRows(rows, table_name, fieldMappings);
         } else {
-          runWriteRows(rows, table_name, fieldMappings, index_field);
+          await runWriteRows(rows, table_name, fieldMappings, index_field);
         }
         importedCount += rows.length;
       }
