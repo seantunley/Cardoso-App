@@ -321,6 +321,69 @@ async function ruleNightlySyncStale() {
   }
 }
 
+// ── Rule: customer sync stale ────────────────────────────────────────────
+//
+// The customer/debtor connections sync every 30 min during business hours.
+// Nothing announced it when that stopped — a failed run used to park the
+// connection in 'error' and the schedulers skipped it from then on, so balances
+// went stale for weeks until a user noticed. This rule alerts on the DATA: if a
+// syncable connection hasn't synced successfully for CUSTOMER_SYNC_STALE_HOURS
+// during business hours (Mon-Fri 08:00-17:59 SAST — so Monday morning doesn't
+// fire on Friday's last sync), fire one deduped warning per connection with the
+// last error. Resolves on the next successful sync, or when the connection is
+// switched off / deleted. Site-only.
+export const CUSTOMER_SYNC_STALE_HOURS = Number(process.env.CUSTOMER_SYNC_STALE_HOURS) || 2;
+
+function inSastBusinessHours(d) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Africa/Johannesburg', weekday: 'short', hour: '2-digit', hour12: false,
+  }).formatToParts(d).map((p) => [p.type, p.value]));
+  const hour = Number(parts.hour) % 24;
+  return !['Sat', 'Sun'].includes(parts.weekday) && hour >= 8 && hour < 18;
+}
+
+export async function ruleCustomerSyncStale(now = new Date()) {
+  if (process.env.HUB_MODE === 'true') return;
+  const toMs = (s) => (s ? Date.parse(String(s).includes('T') ? s : `${String(s).replace(' ', 'T')}Z`) || 0 : 0);
+  const conns = _prep('customerSyncConns', `
+    SELECT id, name, status, last_sync, last_error, created_date FROM databaseconnection
+    WHERE status IN ('active', 'error') AND COALESCE(is_bat_only, 0) = 0 AND COALESCE(record_type, 'customer') <> 'inventory'
+  `).all();
+  const staleKeys = new Set();
+  const businessHours = inSastBusinessHours(now);
+  for (const c of conns) {
+    const key = `customer-sync-stale:${c.id}`;
+    const since = toMs(c.last_sync) || toMs(c.created_date);
+    const ageHours = (now.getTime() - since) / 3_600_000;
+    if (since && ageHours <= CUSTOMER_SYNC_STALE_HOURS) continue; // fresh → resolved below
+    staleKeys.add(key);
+    if (!businessHours) continue; // stale but quiet hours: keep any open alert, don't raise a new one
+    const when = c.last_sync ? `last synced successfully ${ageHours.toFixed(1)} hours ago` : 'has never synced successfully';
+    const why = c.status === 'error' && c.last_error
+      ? `The last attempt failed: ${c.last_error}. It is retried automatically every 30 minutes.`
+      : 'No successful sync has run since — check that the Cardoso service is running on this machine and that Sage is reachable.';
+    fireAlert({
+      ruleName: 'customer-sync-stale',
+      severity: 'warning',
+      message: `Customer sync '${c.name}' ${when} (threshold ${CUSTOMER_SYNC_STALE_HOURS}h) — customer balances in the app may be out of date. ${why}`,
+      context: { connection_id: c.id, connection: c.name, last_sync: c.last_sync || null, age_hours: c.last_sync ? Number(ageHours.toFixed(1)) : null, status: c.status, last_error: c.last_error || null },
+      dedupKey: key,
+    });
+  }
+  let actives;
+  try {
+    actives = _prep('activeCustomerSyncStale', `
+      SELECT dedup_key FROM alerts WHERE resolved_at IS NULL AND dedup_key LIKE 'customer-sync-stale:%'
+    `).all();
+  } catch (err) {
+    if (/no such table/i.test(err.message)) return;
+    throw err;
+  }
+  for (const a of actives) {
+    if (!staleKeys.has(a.dedup_key)) resolveAlerts(a.dedup_key, 'auto');
+  }
+}
+
 // ── Rule: JTI monthly export missing ─────────────────────────────────────
 //
 // The JTI Sales export is generated on the 1st at 02:00 (jti-monthly-export),
@@ -640,6 +703,7 @@ const RULES = [
   { name: 'backup-artifact-stale', fn: ruleBackupArtifactStale },
   { name: 'job-failure-spike', fn: ruleJobFailureSpike },
   { name: 'nightly-sync-stale', fn: ruleNightlySyncStale },
+  { name: 'customer-sync-stale', fn: () => ruleCustomerSyncStale() },
   { name: 'jti-export-missing', fn: ruleJtiExportMissing },
   { name: 'kopia-site-stale', fn: ruleKopiaSiteStale },
   // Security signals — brute-force, flood, scanner detection. Rule
