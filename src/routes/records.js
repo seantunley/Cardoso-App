@@ -1426,6 +1426,11 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
 
         if (flagChanged) {
           data.flag_created_by = req.currentUser.email;
+          // A person set this flag, so it's manual now. Without this, a row that
+          // was auto-flagged keeps auto_flagged = 1 and the next customer sync
+          // treats the user's flag as automatic and can overwrite it.
+          data.auto_flagged = 0;
+          data.flag_source = null;
         }
 
         if (data.local_fields !== undefined) {
