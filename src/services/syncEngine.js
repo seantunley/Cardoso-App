@@ -126,6 +126,32 @@ const _SYNC_SQL = {
   deleteFlagSnapshot: `DELETE FROM flag_snapshots WHERE customer_number = ?`,
 };
 
+// ── Transient SQL Server failures ─────────────────────────────────────────
+// A Sage box over a site VPN/Tailscale link regularly drops a connection or
+// misses the timeout once, then answers fine seconds later. Failing the whole
+// sync on that (and, before the scheduler fix, stopping syncing for good) made
+// the engine look broken. Retry those errors a couple of times with a pause;
+// anything else (bad login, bad query) fails straight away.
+const TRANSIENT_SQL_CODES = new Set(['ETIMEOUT', 'ETIMEDOUT', 'ESOCKET', 'ECONNCLOSED', 'ECONNRESET', 'ECONNREFUSED', 'ENOTOPEN', 'EHOSTUNREACH']);
+export function isTransientSqlError(err) {
+  const codes = [err?.code, err?.originalError?.code, err?.originalError?.info?.code, err?.cause?.code];
+  return codes.some((c) => c && TRANSIENT_SQL_CODES.has(c));
+}
+// Pauses before the 2nd and 3rd attempt. Exported so tests can shorten them.
+export const sqlRetry = { delaysMs: [5000, 15000] };
+async function withSqlRetry(label, fn, { isShuttingDown } = {}) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const delay = sqlRetry.delaysMs[attempt];
+      if (!isTransientSqlError(err) || delay === undefined || (isShuttingDown && isShuttingDown())) throw err;
+      console.warn(`[sync] ${label} failed with a temporary SQL Server error (${err.code || err.originalError?.code}): ${err.message} — retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 2} of ${sqlRetry.delaysMs.length + 1}).`);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+}
+
 const activeSyncs = new Set();
 
 function acquireSyncLock(connectionId) {
@@ -226,7 +252,8 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
     // concurrently would otherwise share one global pool keyed to whichever
     // connected first, and this import's finally{ pool.close() } would tear down
     // the other's in-flight queries (CRIT-1).
-    pool = await new sql.ConnectionPool(sqlConfig).connect();
+    pool = await withSqlRetry(`connect to ${connConfig.host}/${connConfig.database_name}`,
+      () => new sql.ConnectionPool(sqlConfig).connect(), { isShuttingDown });
 
     // ── Query mode (new) vs legacy table-config mode ──────────────────────────
     const syncQuery = connConfig.sync_query ? connConfig.sync_query.trim() : null;
@@ -621,9 +648,11 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
       }
 
       // 60-second timeout on MSSQL queries (set on request object, not chained)
-      const req = pool.request();
-      req.timeout = 60000;
-      const result = await req.query(syncQuery);
+      const result = await withSqlRetry(`sync query for ${connConfig.name}`, () => {
+        const req = pool.request();
+        req.timeout = 60000;
+        return req.query(syncQuery);
+      }, { isShuttingDown });
       const rows = result.recordset || [];
 
       // Use the connection name as the logical source_table so existing records
@@ -695,7 +724,8 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
         }
 
         const query = `SELECT ${fields} FROM [${table_name}]`;
-        const result = await pool.request().query(query);
+        const result = await withSqlRetry(`sync query for ${connConfig.name} / ${table_name}`,
+          () => pool.request().query(query), { isShuttingDown });
         const rows = result.recordset || [];
 
         const configRecordType = config.record_type || connConfig.record_type || 'customer';
