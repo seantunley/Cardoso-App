@@ -111,8 +111,24 @@ function makeFactor(type, text) {
   return { type, text };
 }
 
+// normaliseCreditLogicConfig (deep-merge + zod parse) costs ~38µs, and
+// CustomerBalances scores thousands of rows against the SAME config object.
+// Cache per object identity. Callers pass immutable configs (query data /
+// DEFAULT), and the normalised result is only read below, never mutated or
+// returned — so a shared cached copy is safe. null/undefined → DEFAULT key.
+const normalisedConfigCache = new WeakMap();
+function getNormalisedConfig(configOverride) {
+  const key = configOverride || DEFAULT_CREDIT_LOGIC_CONFIG;
+  let config = normalisedConfigCache.get(key);
+  if (!config) {
+    config = normaliseCreditLogicConfig(key);
+    normalisedConfigCache.set(key, config);
+  }
+  return config;
+}
+
 export function analyseInvoiceCredit(records, flagHistory = [], configOverride = null) {
-  const config = normaliseCreditLogicConfig(configOverride || DEFAULT_CREDIT_LOGIC_CONFIG);
+  const config = getNormalisedConfig(configOverride);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 

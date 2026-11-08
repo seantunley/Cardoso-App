@@ -6,6 +6,13 @@ import { Badge } from "@/components/ui/badge";
 import { Search, ChevronUp, ChevronDown, Shield, Clock, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatAppDate } from "@/lib/dates";
+import { useIsMobile } from "@/hooks/use-mobile";
+
+// Newest AUDIT_LOG_LIMIT rows, sorted server-side by id (insertion order —
+// created_date mixes 'YYYY-MM-DD HH:MM:SS' and ISO formats, so it doesn't
+// string-sort cleanly). Shared by every caller of the ["auditLogs"] query.
+export const AUDIT_LOG_LIMIT = 1000;
+export const AUDIT_LOG_URL = `/api/auditlog?sort=-id&limit=${AUDIT_LOG_LIMIT}`;
 
 const actionColors = {
   update_flag: "bg-orange-100 text-orange-800",
@@ -190,6 +197,8 @@ export default function AuditLogTable({ logs = [] }) {
   const [sortBy, setSortBy] = useState("created_date");
   const [sortOrder, setSortOrder] = useState("desc");
   const [expandedRows, setExpandedRows] = useState(() => new Set());
+  // Render only one layout — CSS-hiding the other still built every row twice.
+  const isMobile = useIsMobile();
 
   // Debounce search input — avoids re-filtering N log rows on every keystroke.
   useEffect(() => {
@@ -282,8 +291,15 @@ export default function AuditLogTable({ logs = [] }) {
             />
           </div>
 
-          {/* Mobile card list — visible only on small screens */}
-          <div className="block sm:hidden space-y-2">
+          {logs.length >= AUDIT_LOG_LIMIT && (
+            <p className="text-xs text-muted-foreground">
+              Showing the latest {AUDIT_LOG_LIMIT.toLocaleString()} entries.
+            </p>
+          )}
+
+          {/* Mobile card list — small screens only */}
+          {isMobile && (
+          <div className="space-y-2">
             {filteredAndSorted.map(({ log, flagSummary, changesPretty }) => {
               const isExpanded = expandedRows.has(log.id);
               const isFlagUpdate = log.action_type === "update_flag";
@@ -325,9 +341,11 @@ export default function AuditLogTable({ logs = [] }) {
               );
             })}
           </div>
+          )}
 
-          {/* Desktop table — hidden on small screens */}
-          <div className="hidden sm:block overflow-x-auto">
+          {/* Desktop table — not rendered on small screens */}
+          {!isMobile && (
+          <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border">
@@ -495,7 +513,8 @@ export default function AuditLogTable({ logs = [] }) {
                 })}
               </tbody>
             </table>
-          </div>{/* end desktop table wrapper */}
+          </div>
+          )}
 
           {filteredAndSorted.length === 0 && (
             <div className="py-8 text-center text-muted-foreground">

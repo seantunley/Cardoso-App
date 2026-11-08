@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LogIn, ClipboardList } from "lucide-react";
 
 // Sub-components
-import AuditLogTable from "@/components/audit/AuditLogTable";
+import AuditLogTable, { AUDIT_LOG_URL } from "@/components/audit/AuditLogTable";
 
 // ─── Audit Log Tab ───────────────────────────────────────────────────────────
 
@@ -18,9 +18,9 @@ export default function AuditTab() {
   const { data: auditLogs = [], isLoading: auditLoading } = useQuery({
     queryKey: ["auditLogs"],
     queryFn: async () => {
-      const r = await fetch("/api/auditlog", { credentials: "include" });
+      const r = await fetch(AUDIT_LOG_URL, { credentials: "include" });
       const d = await r.json();
-      return Array.isArray(d) ? [...d].sort((a,b) => new Date(b.created_date) - new Date(a.created_date)) : [];
+      return Array.isArray(d) ? d : [];
     },
   });
 
