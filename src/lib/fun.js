@@ -81,14 +81,18 @@ export function recordCleanSyncStreak() {
   }
 }
 
-/** @param {{ imported?: number, target?: string | number | null }} [opts] */
-export function cleanImportToastMessage({ imported = 0, target } = {}) {
+/**
+ * `summary` is the server's plain-English account of the run (new / updated /
+ * unchanged / cleared); when given it replaces the bare record count.
+ * @param {{ imported?: number, target?: string | number | null, summary?: string }} [opts]
+ */
+export function cleanImportToastMessage({ imported = 0, target, summary } = {}) {
+  const detail = summary || (target ? `${imported} records` : `${imported} records imported.`);
+  const suffix = target ? `${target} - ${detail}` : detail;
   const streak = recordCleanSyncStreak();
   if (streak > 0 && streak % 3 === 0) {
-    return `${streak} clean syncs in a row. The ledger approves.`;
+    return `${streak} clean syncs in a row. The ledger approves. ${suffix}`;
   }
-
-  const suffix = target ? `${target} - ${imported} records` : `${imported} records imported.`;
   return `${cleanImportMessage()} - ${suffix}`;
 }
 

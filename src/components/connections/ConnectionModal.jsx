@@ -350,7 +350,8 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
       // circuited cleanImportToastMessage on every successful sync,
       // meaning the streak counter inside it never ticked. Always run
       // the streak fn; its output already conveys the imported count.
-      toast.success(cleanImportToastMessage({ imported: result.imported || 0 }));
+      toast.success(cleanImportToastMessage({ imported: result.imported || 0, summary: result.message }));
+      for (const w of result.warnings || []) toast.warning(w, { duration: 15000 });
     } catch (e) {
       resetCleanSyncStreak();
       toast.error("Sync failed: " + (e.message || "Unknown error"));

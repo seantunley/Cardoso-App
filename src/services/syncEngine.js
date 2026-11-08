@@ -32,6 +32,72 @@ const _syncStmts = {};
 // Customers written per transaction in the customer sync; the event loop is
 // handed back between batches so the server stays responsive.
 const SYNC_WRITE_BATCH = 200;
+
+// ── Customers no longer returned by Sage ──────────────────────────────────
+// The customer query returns every Sage customer, so one that drops out was
+// deleted in Sage or rolled into a national account (whose family row now
+// carries its balance). The app used to keep the old balance forever — and
+// for national-account members that counted the money twice, so totals stopped
+// matching Sage's Aged Trial Balance. Their balance, aging and open-invoice
+// list are cleared; the record itself (flags, notes, history) is kept, and its
+// synced_at stays at the last time Sage returned it. A customer that comes
+// back is simply updated by the next sync.
+//
+// Guard: if a run is missing an unusually large share of customers, it's far
+// more likely the query or Sage is wrong than that they were all deleted —
+// nothing is cleared and the run says why.
+export const MISSING_CUSTOMER_GUARD = { maxShare: 0.2, alwaysAllow: 50 };
+const isZeroMoney = (v) => v == null || String(v).trim() === '' || Number(String(v).replace(/[,\s]/g, '')) === 0;
+
+export function clearMissingCustomers(sourceName, seenSourceIds, syncTimestamp) {
+  const live = db.prepare(`
+    SELECT id, source_id, outstanding_balance, age_current, age_7_days, age_14_days, age_21_days, age_analysis, unpaid_invoices
+    FROM datarecord WHERE source_table = ?
+  `).all(sourceName);
+  const missing = live.filter((r) => {
+    const id = String(r.source_id ?? '').trim();
+    return id !== '' && !seenSourceIds.has(id);
+  });
+  if (missing.length === 0) return { missing: 0, cleared: 0 };
+  if (seenSourceIds.size === 0) {
+    return { missing: missing.length, cleared: 0, clearSkipped: 'Sage returned no customers at all, so nothing was cleared.' };
+  }
+  const limit = Math.max(MISSING_CUSTOMER_GUARD.alwaysAllow, Math.floor(live.length * MISSING_CUSTOMER_GUARD.maxShare));
+  if (missing.length > limit) {
+    return {
+      missing: missing.length, cleared: 0,
+      clearSkipped: `${missing.length} of ${live.length} customers were missing from Sage's results — more than the ${limit} allowed in one run, so this looks like a query or Sage problem rather than real deletions. Their balances were left as they were; check the connection's sync query.`,
+    };
+  }
+  const toClear = missing.filter((r) => [r.outstanding_balance, r.age_current, r.age_7_days, r.age_14_days, r.age_21_days].some((v) => !isZeroMoney(v))
+    || String(r.age_analysis ?? '').trim() !== ''
+    || !['', '[]'].includes(String(r.unpaid_invoices ?? '').trim()));
+  const clear = db.prepare(`
+    UPDATE datarecord
+    SET outstanding_balance = '0', age_current = '0', age_7_days = '0', age_14_days = '0', age_21_days = '0',
+        age_analysis = '', unpaid_invoices = '[]', updated_date = ?
+    WHERE id = ?
+  `);
+  db.transaction(() => { for (const r of toClear) clear.run(syncTimestamp, r.id); })();
+  return { missing: missing.length, cleared: toClear.length };
+}
+
+// One plain-English line for the connection status, the sync history and the
+// "Sync now" result — replaces "Import completed - N records added", which
+// reported the number of rows Sage returned no matter what actually changed.
+export function describeSyncResult(t) {
+  const n = (x) => Number(x || 0).toLocaleString('en-ZA');
+  const parts = [];
+  if (t.customersFetched) {
+    parts.push(`${n(t.customersFetched)} customer rows from Sage: ${n(t.inserted)} new, ${n(t.updated)} updated, ${n(t.unchanged)} unchanged`);
+    if (t.cleared) parts.push(`${n(t.cleared)} no longer in Sage (balances cleared)`);
+    if (t.duplicates) parts.push(`${n(t.duplicates)} duplicate rows skipped`);
+  }
+  if (t.itemsFetched) parts.push(`${n(t.itemsFetched)} stock items from Sage`);
+  let msg = parts.length ? `Synced ${parts.join(', ')}.` : 'Synced — Sage returned no rows.';
+  for (const note of t.notes || []) msg += ` ${note}`;
+  return msg;
+}
 function getSyncStmt(key) {
   if (_syncStmts[key]) return _syncStmts[key];
   _syncStmts[key] = db.prepare(_SYNC_SQL[key]);
@@ -242,6 +308,8 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
       );
 
     let importedCount = 0;
+    // What this run actually did, across every query/table (see describeSyncResult).
+    const totals = { customersFetched: 0, customers: 0, inserted: 0, updated: 0, unchanged: 0, duplicates: 0, cleared: 0, itemsFetched: 0, notes: [] };
 
     // Hot-path write statements lazy-prepared on first call (see _SYNC_SQL
     // at the top of this file). Aliased locally so the call sites below
@@ -583,6 +651,21 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
         await new Promise((resolve) => setImmediate(resolve));
       }
       console.log(`[sync-stats] ${sourceName}: ${rows.length} incoming rows, ${seenSourceIds.size} unique, ${syncUpdated} updated, ${syncInserted} inserted, ${syncSkipped} unchanged (no-op), ${rows.length - seenSourceIds.size} duplicate rows skipped`);
+
+      const missing = clearMissingCustomers(sourceName, seenSourceIds, syncTimestamp);
+      if (missing.clearSkipped) {
+        const note = `Did not clear customers missing from Sage for ${connConfig.name}: ${missing.clearSkipped}`;
+        totals.notes.push(note);
+        try { logError('sync.missing_customers_guard', new Error(note), { connection_id: connectionId, source_table: sourceName, missing: missing.missing }, 'warn'); }
+        catch (e) { console.error('[sync.missing_customers_guard.log] failed', e.message); }
+      }
+      totals.customersFetched += rows.length;
+      totals.customers += seenSourceIds.size;
+      totals.inserted += syncInserted;
+      totals.updated += syncUpdated;
+      totals.unchanged += syncSkipped;
+      totals.duplicates += rows.length - seenSourceIds.size;
+      totals.cleared += missing.cleared;
     };
     if (syncQuery) {
       // ── QUERY MODE ─────────────────────────────────────────────────────────
@@ -656,6 +739,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
           });
           pruneViaTempTable(freshItemNumbers);
         }
+        totals.itemsFetched += rows.length;
       } else {
         await runWriteRows(rows, sourceName, queryFieldMappings, queryIndexField);
       }
@@ -701,6 +785,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
         const configRecordType = config.record_type || connConfig.record_type || 'customer';
         if (configRecordType === 'inventory') {
           runInventoryRows(rows, table_name, fieldMappings);
+          totals.itemsFetched += rows.length;
         } else {
           await runWriteRows(rows, table_name, fieldMappings, index_field);
         }
@@ -712,8 +797,9 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
       UPDATE databaseconnection
       SET record_count = ?, last_sync = ?, last_error = NULL, updated_date = ?, status = 'active'
       WHERE id = ?
-    `).run(importedCount, new Date().toISOString(), new Date().toISOString(), connectionId);
+    `).run(totals.customers + totals.itemsFetched || importedCount, new Date().toISOString(), new Date().toISOString(), connectionId);
 
+    const resultMessage = describeSyncResult(totals);
     if (syncRunId) {
       db.prepare(`
         UPDATE syncrun
@@ -721,7 +807,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
         WHERE id = ?
       `).run(
         new Date().toISOString(),
-        `Imported ${importedCount} records`,
+        resultMessage,
         syncRunId
       );
     }
@@ -751,8 +837,10 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
 
     return {
       success: true,
-      message: `Import completed - ${importedCount} records added`,
+      message: resultMessage,
       imported: importedCount,
+      counts: { ...totals, notes: undefined },
+      warnings: totals.notes,
     };
   } catch (error) {
     // Pull the connection's identifying fields so the persisted error

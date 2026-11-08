@@ -204,7 +204,8 @@ export default function ConnectionsTab({ currentUser }) {
       // Falling back via `r.message ||` would short-circuit on every
       // successful sync since runConnectionImport always returns a
       // non-empty success message. See ConnectionModal.handleImport.
-      toast.success(cleanImportToastMessage({ imported: r.imported || 0, target: conn.name }));
+      toast.success(cleanImportToastMessage({ imported: r.imported || 0, target: conn.name, summary: r.message }));
+      for (const w of r.warnings || []) toast.warning(w, { duration: 15000 });
       queryClient.invalidateQueries({ queryKey: ["connections"] });
       queryClient.invalidateQueries({ queryKey: ["records"] });
     } catch (e) { resetCleanSyncStreak(); toast.error(humanizeApiError(e, `sync "${conn.name}"`)); }
