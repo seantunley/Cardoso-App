@@ -316,7 +316,8 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
             SELECT id, created_by, source_id, source_table, customer_number, customer_name,
                    age_analysis, age_current, age_7_days, age_14_days, age_21_days,
                    note, local_fields, flag_color, flag_reason, flag_created_by, data,
-                   outstanding_balance, terms, sales_rep, account_type, unpaid_invoices, receipts
+                   outstanding_balance, terms, sales_rep, account_type, unpaid_invoices, receipts,
+                   auto_flagged, flag_source, custom_field_1, custom_field_2, custom_field_3
             FROM datarecord
             WHERE source_table = ? AND (
               TRIM(source_id) IN (${placeholders})
@@ -464,23 +465,29 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
              // Apply auto-flag rules only if the record was NOT manually flagged by a user
              // (manually flagged = has a flag AND auto_flagged is 0 AND flag_created_by is set)
              const manuallyFlagged = existing.flag_color && !existing.auto_flagged && existing.flag_created_by;
-             if (activeAutoFlagRules.length > 0 && !manuallyFlagged) {
-               const mergedRecord = expandDataRecord({ ...existing, ...baseRecordData });
-               const autoFlag = applyAutoFlagRulesToRecord(mergedRecord, activeAutoFlagRules);
-               if (autoFlag) {
-                 // Flag it (or update the auto-flag if the rule result changed)
-                 updateRecordFlag.run(autoFlag.flag_color, autoFlag.flag_reason, 1, existing.id);
-               } else if (existing.auto_flagged) {
-                 // Rule no longer matches — clear the auto-flag
-                 updateRecordFlag.run(null, null, 0, existing.id);
-               }
-               // updateRecordFlag writes only flag_*/auto_flagged, NOT updated_date.
-               // When the main data UPDATE above was skipped as a no-op but the
-               // auto-flag just CHANGED the flag (e.g. a rule was added/edited on
-               // an otherwise-unchanged row), bump updated_date so the hub's
-               // incremental pull (updated_date > since) still picks up the change.
-               if (noOp && autoFlagWouldChange(existing, autoFlag)) {
-                 touchUpdatedDate.run(syncTimestamp, existing.id);
+             // With no active rules, still visit rows that carry an auto-flag so
+             // disabling the LAST rule clears its flags too (no rule matches).
+             if (!manuallyFlagged && (activeAutoFlagRules.length > 0 || existing.auto_flagged)) {
+               const autoFlag = activeAutoFlagRules.length > 0
+                 ? applyAutoFlagRulesToRecord(expandDataRecord({ ...existing, ...baseRecordData }), activeAutoFlagRules)
+                 : null;
+               // Only write when the flag actually changes. (auto_flagged used to be
+               // missing from the existing-row SELECT, so every matching row was
+               // rewritten and re-sent to the hub every sync, and stale auto-flags
+               // were never cleared.)
+               if (autoFlagWouldChange(existing, autoFlag)) {
+                 if (autoFlag) {
+                   // Flag it (or update the auto-flag if the rule result changed)
+                   updateRecordFlag.run(autoFlag.flag_color, autoFlag.flag_reason, 1, existing.id);
+                 } else {
+                   // Rule no longer matches — clear the auto-flag
+                   updateRecordFlag.run(null, null, 0, existing.id);
+                 }
+                 // updateRecordFlag writes only flag_*/auto_flagged, NOT updated_date.
+                 // When the main data UPDATE above was skipped as a no-op, bump
+                 // updated_date so the hub's incremental pull (updated_date > since)
+                 // still picks up the flag change.
+                 if (noOp) touchUpdatedDate.run(syncTimestamp, existing.id);
                }
              }
           } else {
