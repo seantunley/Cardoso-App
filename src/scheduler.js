@@ -45,6 +45,25 @@ export function setServer(s) {
   serverRef = s;
 }
 
+// A failed import sets the connection to status 'error'. The schedulers used to
+// pick only 'active' connections, so ONE failure (e.g. a Sage timeout) stopped
+// automatic syncing for good until someone ran a manual sync. 'error'
+// connections are retried; 'inactive' ones (switched off by a user) are not.
+export const SYNCABLE_CONNECTIONS_SQL ="status IN ('active', 'error') AND COALESCE(is_bat_only, 0) = 0";
+// Minimum gap between automatic retries of a connection whose last sync failed.
+export const ERROR_RETRY_MS = 30 * 60 * 1000;
+
+// Is an interval-scheduled connection due? Due once sync_interval_hours have
+// passed since its last successful sync; a connection in 'error' additionally
+// waits ERROR_RETRY_MS since its last failure (updated_date, stamped on failure)
+// so a site whose Sage is down isn't retried every 5-minute tick.
+export function isAutoSyncDue(conn, now = Date.now()) {
+  const toMs = (s) => (s ? Date.parse(String(s).includes('T') ? s : `${String(s).replace(' ', 'T')}Z`) || 0 : 0);
+  if (now - toMs(conn.last_sync) < conn.sync_interval_hours * 60 * 60 * 1000) return false;
+  if (conn.status === 'error' && now - toMs(conn.updated_date) < ERROR_RETRY_MS) return false;
+  return true;
+}
+
 async function runScheduledSyncCycle() {
   if (shuttingDown) return;
   if (scheduledSyncInProgress) return;
@@ -55,7 +74,7 @@ async function runScheduledSyncCycle() {
     // Skip BAT-only connections — those are accessed live by the BAT module
     // and must NOT be swept into the local datarecord table.
     const connections = db
-      .prepare(`SELECT id, name FROM databaseconnection WHERE status = 'active' AND COALESCE(is_bat_only, 0) = 0`)
+      .prepare(`SELECT id, name FROM databaseconnection WHERE ${SYNCABLE_CONNECTIONS_SQL}`)
       .all();
 
     for (const connection of connections) {
@@ -1117,16 +1136,14 @@ export function startSchedulers() {
       autoSyncRunning = true;
       try {
         const conns = db.prepare(
-          "SELECT id, last_sync, sync_interval_hours FROM databaseconnection WHERE status = 'active' AND COALESCE(is_bat_only, 0) = 0 AND sync_interval_hours IS NOT NULL AND sync_interval_hours > 0"
+          `SELECT id, status, last_sync, updated_date, sync_interval_hours FROM databaseconnection WHERE ${SYNCABLE_CONNECTIONS_SQL} AND sync_interval_hours IS NOT NULL AND sync_interval_hours > 0`
         ).all();
         const now = Date.now();
         let triggered = 0;
         let failed = 0;
         const errors = [];
         for (const conn of conns) {
-          const lastSync = conn.last_sync ? new Date(conn.last_sync).getTime() : 0;
-          const intervalMs = conn.sync_interval_hours * 60 * 60 * 1000;
-          if (now - lastSync >= intervalMs) {
+          if (isAutoSyncDue(conn, now)) {
             console.log(`[auto-sync] triggering sync for connection ${conn.id}`);
             triggered += 1;
             // Await each import SEQUENTIALLY rather than firing them all unawaited:
