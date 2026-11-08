@@ -65,4 +65,19 @@ describe('customer sync auto-flags', () => {
     expect(rec('A')).toMatchObject({ flag_color: null, auto_flagged: 0 }); // stale auto-flag cleared
     expect(rec('B')).toMatchObject({ flag_color: 'green', auto_flagged: 0, flag_created_by: 'user@x' }); // manual flag kept
   });
+
+  it('clears auto-flags when the last active rule is disabled, keeping manual flags', async () => {
+    sageRows = [
+      { customer_number: 'A', customer_name: 'Alpha', outstanding_balance: '5000' },
+      { customer_number: 'B', customer_name: 'Bravo', outstanding_balance: '5000' },
+    ];
+    await sync();
+    expect(rec('A')).toMatchObject({ flag_color: 'red', auto_flagged: 1 });
+    expect(rec('B')).toMatchObject({ flag_color: 'green', flag_created_by: 'user@x' }); // still manual from the test above
+
+    memDb.prepare('UPDATE autoflagrule SET is_active = 0').run(); // no active rules left
+    await sync(); // same data
+    expect(rec('A')).toMatchObject({ flag_color: null, auto_flagged: 0 });
+    expect(rec('B')).toMatchObject({ flag_color: 'green', auto_flagged: 0, flag_created_by: 'user@x' });
+  });
 });

@@ -454,9 +454,12 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
              // Apply auto-flag rules only if the record was NOT manually flagged by a user
              // (manually flagged = has a flag AND auto_flagged is 0 AND flag_created_by is set)
              const manuallyFlagged = existing.flag_color && !existing.auto_flagged && existing.flag_created_by;
-             if (activeAutoFlagRules.length > 0 && !manuallyFlagged) {
-               const mergedRecord = expandDataRecord({ ...existing, ...baseRecordData });
-               const autoFlag = applyAutoFlagRulesToRecord(mergedRecord, activeAutoFlagRules);
+             // With no active rules, still visit rows that carry an auto-flag so
+             // disabling the LAST rule clears its flags too (no rule matches).
+             if (!manuallyFlagged && (activeAutoFlagRules.length > 0 || existing.auto_flagged)) {
+               const autoFlag = activeAutoFlagRules.length > 0
+                 ? applyAutoFlagRulesToRecord(expandDataRecord({ ...existing, ...baseRecordData }), activeAutoFlagRules)
+                 : null;
                // Only write when the flag actually changes. (auto_flagged used to be
                // missing from the existing-row SELECT, so every matching row was
                // rewritten and re-sent to the hub every sync, and stale auto-flags
