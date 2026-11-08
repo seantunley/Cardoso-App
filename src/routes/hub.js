@@ -1253,7 +1253,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
   // (uses the existing syncAllSites function which now also pulls BAT summaries).
   router.post('/api/hub/bat-summary/refresh', requireAuth, requireAdmin, async (req, res) => {
     try {
-      await syncAllSites();
+      await syncAllSites({ force: true });
       res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -1399,7 +1399,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         details: 'Cleared hub_records, hub_inventory, hub_sync_log; full pull triggered',
       });
       res.status(202).json({ message: 'Force resync triggered — full pull from all sites' });
-      syncAllSites().catch(err => console.error('[HUB] Force resync error:', err));
+      syncAllSites({ force: true }).catch(err => console.error('[HUB] Force resync error:', err));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -1433,7 +1433,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         resourceId: siteId, resourceName: site?.name || site?.slug || siteId,
         details: `Cleared site data and triggered full pull for site ${siteId}`,
       });
-      syncAllSites().catch(err => console.error("force-resync error:", err));
+      syncAllSites({ force: true }).catch(err => console.error("force-resync error:", err));
       res.status(202).json({ ok: true });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -1733,7 +1733,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       details: `Manual sync triggered for ${HUB_SITES.length} site(s): ${HUB_SITES.map(s => s.slug).join(', ').slice(0, 200)}`,
     });
     res.status(202).json({ message: 'Sync triggered', sites: HUB_SITES.map(s => s.slug) });
-    syncAllSites().catch(err => console.error('[HUB] Manual sync error:', err));
+    syncAllSites({ force: true }).catch(err => console.error('[HUB] Manual sync error:', err));
   });
 
   // ==================== HUB: CENTRALISED USER MANAGEMENT ====================
@@ -2154,7 +2154,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       let hubPullOk = true;
       let hubPullError = null;
       try {
-        const refreshResult = await syncSite(site);
+        const refreshResult = await syncSite(site, { force: true });
         if (refreshResult?.error) {
           hubPullOk = false;
           hubPullError = String(refreshResult.error);
