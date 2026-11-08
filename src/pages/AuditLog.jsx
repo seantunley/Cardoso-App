@@ -1,22 +1,20 @@
 import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/apiClient";
-import AuditLogTable from "../components/audit/AuditLogTable";
+import AuditLogTable, { AUDIT_LOG_URL } from "../components/audit/AuditLogTable";
 import DataTable from "@/components/shared/DataTable";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Shield, LogIn, ClipboardList } from "lucide-react";
 
 async function fetchAuditLogs() {
-  const response = await fetch("/api/auditlog", {
+  const response = await fetch(AUDIT_LOG_URL, {
     method: "GET",
     credentials: "include",
   });
   const result = await response.json();
   if (!response.ok) throw new Error(result.error || "Failed to fetch audit logs");
-  return Array.isArray(result)
-    ? [...result].sort((a, b) => new Date(b.created_date).getTime() - new Date(a.created_date).getTime())
-    : [];
+  return Array.isArray(result) ? result : [];
 }
 
 async function fetchLoginLogs() {

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { toast } from 'sonner';
 import { humanizeApiError } from '@/lib/humanizeApiError';
 import { reportClientError } from '@/lib/clientLog';
+import { useBatSageHealth } from '@/lib/useSageHealth';
 import { RefreshCw, FileText, ChevronLeft, ChevronDown, ChevronRight, AlertTriangle, Upload, Calendar as CalendarIcon } from 'lucide-react';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -33,54 +34,16 @@ import { useColorScheme } from '@/lib/useColorScheme';
 //   ok === false (1-4 fails)       → amber   "Sage degraded"
 //   ok === null (no probe yet)     → grey    "Sage —"
 function SageStatusPill() {
-  const [health, setHealth] = useState(null);
-  // fetchFailed flips true when /api/bat/sage-health is unreachable
-  // OR returns non-OK. The pill still renders in that case (as unknown
+  // Shared query with Layout's Sage banner (one poll for both).
+  // fetchFailed is true when /api/bat/sage-health is unreachable OR
+  // returns non-OK. The pill still renders in that case (as unknown
   // with a distinct tooltip) instead of disappearing — operators
   // shouldn't have to guess "is the feature broken or just unset?".
-  const [fetchFailed, setFetchFailed] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    const fetchHealth = async () => {
-      try {
-        const r = await fetch('/api/bat/sage-health', { credentials: 'include' });
-        if (!r.ok) {
-          // CRITICAL: clear `health` alongside flipping fetchFailed.
-          // If we only flipped the flag, a previously-fetched
-          // `{ ok: true }` would keep rendering the green "Sage OK"
-          // pill while the probe endpoint is currently unreachable —
-          // operator sees a healthy badge but the data is stale and
-          // we have no current ground truth. Reset to null so the
-          // render priority falls through to the unknown branch
-          // (which will use the fetchFailed tooltip).
-          if (!cancelled) {
-            setHealth(null);
-            setFetchFailed(true);
-          }
-          return;
-        }
-        const data = await r.json();
-        if (!cancelled) {
-          setHealth(data);
-          setFetchFailed(false);
-        }
-      } catch {
-        // Network error (server down, offline, etc.) — same shape:
-        // clear stale health AND flip fetchFailed. The pill renders
-        // the unknown branch with the probe-endpoint-specific
-        // tooltip rather than continuing to display whatever the
-        // last successful poll returned.
-        if (!cancelled) {
-          setHealth(null);
-          setFetchFailed(true);
-        }
-      }
-    };
-    fetchHealth();
-    const t = setInterval(fetchHealth, 60_000);
-    return () => { cancelled = true; clearInterval(t); };
-  }, []);
+  // CRITICAL: `health` is cleared while failed — TanStack keeps the last
+  // good data on error, and a stale `{ ok: true }` would keep rendering
+  // the green "Sage OK" pill with no current ground truth.
+  const { data, isError: fetchFailed } = useBatSageHealth();
+  const health = fetchFailed ? null : data ?? null;
 
   // Pill ALWAYS renders — three "unknown" sub-cases:
   //   - initial load before the first fetch resolves (health === null,
