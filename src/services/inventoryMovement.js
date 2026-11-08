@@ -40,6 +40,44 @@ async function writeRowsBatched(label, rows, applyRow, batchSize = 2000) {
   }
 }
 
+// [lo, hi] date ranges ('YYYY-MM-DD', inclusive) for each calendar month the
+// window touches, clipped to the window. 'YYYY-MM-31' is a safe string upper
+// bound for every month.
+export function monthRanges(fromDateStr, toDateStr) {
+  const out = [];
+  let [y, m] = fromDateStr.split('-').map(Number);
+  const end = toDateStr.slice(0, 7);
+  for (;;) {
+    const ym = `${y}-${String(m).padStart(2, '0')}`;
+    if (ym > end) break;
+    const lo = `${ym}-01`, hi = `${ym}-31`;
+    out.push([lo < fromDateStr ? fromDateStr : lo, hi > toDateStr ? toDateStr : hi]);
+    if (++m > 12) { m = 1; y += 1; }
+  }
+  return out;
+}
+
+// Months whose staged Sage lines differ from the live inventory_sales_transactions.
+// Lines aren't unique, so compare as multisets: same total count AND every
+// distinct line occurs the same number of times on both sides.
+const TXN_COLS = 'item_number, transaction_date, order_number, customer_code, customer_name, qty_sold, unit_price, line_amount';
+export async function changedTxnMonths(fromDateStr, toDateStr) {
+  const count = (table) => db.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE transaction_date >= ? AND transaction_date <= ?`);
+  const stageCount = count('stage_sales_txn');
+  const liveCount = count('inventory_sales_transactions');
+  const grouped = (table) => `SELECT ${TXN_COLS}, COUNT(*) FROM ${table} WHERE transaction_date >= ? AND transaction_date <= ? GROUP BY ${TXN_COLS}`;
+  const stageNotInLive = db.prepare(`SELECT 1 FROM (${grouped('stage_sales_txn')} EXCEPT ${grouped('inventory_sales_transactions')}) LIMIT 1`);
+  const changed = [];
+  for (const [lo, hi] of monthRanges(fromDateStr, toDateStr)) {
+    const done = trackOp(`inventory-sales-sync:compare ${lo.slice(0, 7)}`);
+    try {
+      if (stageCount.get(lo, hi).n !== liveCount.get(lo, hi).n || stageNotInLive.get(lo, hi, lo, hi)) changed.push([lo, hi]);
+    } finally { done(); }
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  return changed;
+}
+
 // Per-process guard for the sales sync. The sync ingests into shared scratch
 // staging tables and then swaps them into the live tables (see below). Two
 // concurrent runs — e.g. the manual /api/inventory-movement/sync route firing
@@ -127,7 +165,8 @@ async function _syncSalesFromSage({ fromDate, toDate } = {}) {
   // whole multi-year set in RAM — on top of the already fully-materialized
   // txnRows — and could OOM a high-volume site before the swap. File-backed
   // staging spills to disk instead, so the rebuild no longer depends on enough
-  // RAM for the entire sales history. stage_sales_agg carries a PK so a stray
+  // RAM for the entire sales history. stage_sales_txn uses the live table's
+  // column types so the per-month compare sees identical values. stage_sales_agg carries a PK so a stray
   // duplicate (item, period) from Sage collapses here, last-wins, as the old
   // upsert did; stage_sales_txn has no key (transaction lines are not unique).
   // DROP up front clears any table a prior crash left behind.
@@ -135,7 +174,8 @@ async function _syncSalesFromSage({ fromDate, toDate } = {}) {
     DROP TABLE IF EXISTS stage_sales_agg;
     DROP TABLE IF EXISTS stage_sales_txn;
     CREATE TABLE stage_sales_agg (item_number, period, qty_sold, revenue, order_count, last_sale_date, item_description, PRIMARY KEY (item_number, period));
-    CREATE TABLE stage_sales_txn (item_number, transaction_date, order_number, customer_code, customer_name, qty_sold, unit_price, line_amount);
+    CREATE TABLE stage_sales_txn (item_number TEXT, transaction_date TEXT, order_number TEXT, customer_code TEXT, customer_name TEXT, qty_sold REAL, unit_price REAL, line_amount REAL);
+    CREATE INDEX stage_sales_txn_date ON stage_sales_txn (transaction_date);
   `);
   const stageAgg = db.prepare(`
     INSERT OR REPLACE INTO stage_sales_agg (item_number, period, qty_sold, revenue, order_count, last_sale_date, item_description)
@@ -180,22 +220,38 @@ async function _syncSalesFromSage({ fromDate, toDate } = {}) {
       );
     });
 
+    // A staged line with no date can never be swapped in (transaction_date is
+    // NOT NULL) — fail before touching the live tables, as the old whole-window
+    // INSERT did via the constraint.
+    const nullDates = db.prepare('SELECT COUNT(*) AS n FROM stage_sales_txn WHERE transaction_date IS NULL').get().n;
+    if (nullDates) throw new Error(`inventory sales sync: ${nullDates} Sage sales line(s) have no usable transaction date — live sales data left unchanged`);
+
+    // Work out which months actually changed. Replacing the whole 3-year window
+    // (~900k lines) every night held the event loop for 10-13s in the swap
+    // below; Sage history barely moves, so most nights only the current month
+    // differs. Compare per month (multiset: identical lines are counted), with
+    // a yield between months so the loop keeps breathing.
+    const changedMonths = await changedTxnMonths(fromDateStr, toDateStr);
+
     // Atomic swap: clear each window and copy the fully-staged rows into the live
     // tables in ONE transaction (a C-level INSERT...SELECT, far cheaper than the
     // per-row JS loop). Both tables swap together so cache and transaction detail
     // can never be read inconsistently, and the replace is all-or-nothing — if
     // anything above failed, the live window was never touched. Reconcile
     // deletions: item-months/days that dropped out of the staged set are removed
-    // by the window clear; rows outside the window are untouched.
-    const doneSwap = trackOp('inventory-sales-sync:swap');
+    // by the per-month clear; unchanged months and rows outside the window are
+    // untouched.
+    const doneSwap = trackOp(`inventory-sales-sync:swap (${changedMonths.length} changed month(s))`);
     try {
+      const delTxn = db.prepare('DELETE FROM inventory_sales_transactions WHERE transaction_date >= ? AND transaction_date <= ?');
+      const insTxn = db.prepare(`INSERT INTO inventory_sales_transactions (item_number, transaction_date, order_number, customer_code, customer_name, qty_sold, unit_price, line_amount)
+                    SELECT item_number, transaction_date, order_number, customer_code, customer_name, qty_sold, unit_price, line_amount
+                    FROM stage_sales_txn WHERE transaction_date >= ? AND transaction_date <= ?`);
       db.transaction(() => {
         db.prepare('DELETE FROM inventory_sales_cache WHERE period >= ? AND period <= ?').run(fromPeriod, toPeriod);
         db.prepare(`INSERT INTO inventory_sales_cache (item_number, period, qty_sold, revenue, order_count, last_sale_date, item_description)
                     SELECT item_number, period, qty_sold, revenue, order_count, last_sale_date, item_description FROM stage_sales_agg`).run();
-        db.prepare('DELETE FROM inventory_sales_transactions WHERE transaction_date >= ? AND transaction_date <= ?').run(fromDateStr, toDateStr);
-        db.prepare(`INSERT INTO inventory_sales_transactions (item_number, transaction_date, order_number, customer_code, customer_name, qty_sold, unit_price, line_amount)
-                    SELECT item_number, transaction_date, order_number, customer_code, customer_name, qty_sold, unit_price, line_amount FROM stage_sales_txn`).run();
+        for (const [lo, hi] of changedMonths) { delTxn.run(lo, hi); insTxn.run(lo, hi); }
       })();
     } finally { doneSwap(); }
   } finally {
