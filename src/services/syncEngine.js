@@ -43,13 +43,17 @@ const SYNC_WRITE_BATCH = 200;
 // synced_at stays at the last time Sage returned it. A customer that comes
 // back is simply updated by the next sync.
 //
-// Guard: if a run is missing an unusually large share of customers, it's far
-// more likely the query or Sage is wrong than that they were all deleted —
-// nothing is cleared and the run says why.
-export const MISSING_CUSTOMER_GUARD = { maxShare: 0.2, alwaysAllow: 50 };
+// Guard against a broken query or a half-answering Sage: if Sage suddenly
+// returns noticeably FEWER customers than the last successful sync did
+// (previousCount — the connection's record_count), nothing is cleared and the
+// run says why. Compared with the previous run rather than with how many stale
+// records exist, so a site with a large backlog (years of customers rolled into
+// national accounts) is still cleaned up on its first run. Without a previous
+// count (legacy multi-table connections), fall back to a cap on the share.
+export const MISSING_CUSTOMER_GUARD = { maxDrop: 0.2, maxShare: 0.2, alwaysAllow: 50 };
 const isZeroMoney = (v) => v == null || String(v).trim() === '' || Number(String(v).replace(/[,\s]/g, '')) === 0;
 
-export function clearMissingCustomers(sourceName, seenSourceIds, syncTimestamp) {
+export function clearMissingCustomers(sourceName, seenSourceIds, syncTimestamp, previousCount = null) {
   const live = db.prepare(`
     SELECT id, source_id, outstanding_balance, age_current, age_7_days, age_14_days, age_21_days, age_analysis, unpaid_invoices
     FROM datarecord WHERE source_table = ?
@@ -62,12 +66,23 @@ export function clearMissingCustomers(sourceName, seenSourceIds, syncTimestamp) 
   if (seenSourceIds.size === 0) {
     return { missing: missing.length, cleared: 0, clearSkipped: 'Sage returned no customers at all, so nothing was cleared.' };
   }
-  const limit = Math.max(MISSING_CUSTOMER_GUARD.alwaysAllow, Math.floor(live.length * MISSING_CUSTOMER_GUARD.maxShare));
-  if (missing.length > limit) {
-    return {
-      missing: missing.length, cleared: 0,
-      clearSkipped: `${missing.length} of ${live.length} customers were missing from Sage's results — more than the ${limit} allowed in one run, so this looks like a query or Sage problem rather than real deletions. Their balances were left as they were; check the connection's sync query.`,
-    };
+  const seen = seenSourceIds.size;
+  if (previousCount > 0) {
+    const drop = previousCount - seen;
+    if (drop > Math.max(MISSING_CUSTOMER_GUARD.alwaysAllow, previousCount * MISSING_CUSTOMER_GUARD.maxDrop)) {
+      return {
+        missing: missing.length, cleared: 0,
+        clearSkipped: `Sage returned ${seen} customers, ${Math.round((1 - seen / previousCount) * 100)}% fewer than the ${previousCount} in the last successful sync — that looks like a query or Sage problem rather than real deletions, so the ${missing.length} missing customers' balances were left as they were for this run. Check the connection's sync query. If Sage keeps returning this many, the next sync treats them as removed and clears them; any customer that reappears gets its real balance back on the following sync.`,
+      };
+    }
+  } else {
+    const limit = Math.max(MISSING_CUSTOMER_GUARD.alwaysAllow, Math.floor(live.length * MISSING_CUSTOMER_GUARD.maxShare));
+    if (missing.length > limit) {
+      return {
+        missing: missing.length, cleared: 0,
+        clearSkipped: `${missing.length} of ${live.length} customers were missing from Sage's results — more than the ${limit} allowed in one run, so this looks like a query or Sage problem rather than real deletions. Their balances were left as they were; check the connection's sync query.`,
+      };
+    }
   }
   const toClear = missing.filter((r) => [r.outstanding_balance, r.age_current, r.age_7_days, r.age_14_days, r.age_21_days].some((v) => !isZeroMoney(v))
     || String(r.age_analysis ?? '').trim() !== ''
@@ -363,7 +378,9 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
     // kept around (no destructive migration) but is no longer written to.
 
     // Shared write-rows helper used by both query mode and legacy table mode
-    const runWriteRows = async (rows, sourceName, mappings, indexField) => {
+    // previousCount: customers the last successful sync saw (query mode only) —
+    // the baseline for the missing-customer guard.
+    const runWriteRows = async (rows, sourceName, mappings, indexField, previousCount = null) => {
       // Keyed lookup — load only this batch's source_ids, not the full table.
       // Runs INSIDE each batch's transaction (see writeRowsTransaction), so the
       // existing values a batch writes back (flags, notes…) are read in the same
@@ -652,7 +669,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
       }
       console.log(`[sync-stats] ${sourceName}: ${rows.length} incoming rows, ${seenSourceIds.size} unique, ${syncUpdated} updated, ${syncInserted} inserted, ${syncSkipped} unchanged (no-op), ${rows.length - seenSourceIds.size} duplicate rows skipped`);
 
-      const missing = clearMissingCustomers(sourceName, seenSourceIds, syncTimestamp);
+      const missing = clearMissingCustomers(sourceName, seenSourceIds, syncTimestamp, previousCount);
       if (missing.clearSkipped) {
         const note = `Did not clear customers missing from Sage for ${connConfig.name}: ${missing.clearSkipped}`;
         totals.notes.push(note);
@@ -741,7 +758,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
         }
         totals.itemsFetched += rows.length;
       } else {
-        await runWriteRows(rows, sourceName, queryFieldMappings, queryIndexField);
+        await runWriteRows(rows, sourceName, queryFieldMappings, queryIndexField, Number(connConfig.record_count) || null);
       }
       importedCount = rows.length;
     } else {

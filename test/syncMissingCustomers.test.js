@@ -67,15 +67,32 @@ describe('customers no longer in Sage', () => {
     expect(rec('C')).toMatchObject({ outstanding_balance: '40', flag_color: 'red' });
   });
 
-  it('refuses to clear when an unusually large share is missing, and says why', async () => {
+  it('holds off for one run when Sage suddenly returns far fewer customers, then accepts a lasting drop', async () => {
     sageRows = Array.from({ length: 300 }, (_, i) => cust(`K${i}`, 10));
     await sync();
-    sageRows = sageRows.slice(0, 100); // 200 of 300 missing → looks like a broken query, not deletions
+    const withBalance = () => memDb.prepare("SELECT COUNT(*) AS n FROM datarecord WHERE outstanding_balance = '10'").get().n;
+    sageRows = sageRows.slice(0, 100); // sudden 67% drop → looks like a broken query, not deletions
     const res = await sync();
-    expect(memDb.prepare("SELECT COUNT(*) AS n FROM datarecord WHERE outstanding_balance = '10'").get().n).toBe(300);
+    expect(withBalance()).toBe(300);
     expect(res.warnings).toHaveLength(1);
-    expect(res.warnings[0]).toMatch(/200 of 300 customers were missing/);
+    expect(res.warnings[0]).toMatch(/Sage returned 100 customers, 67% fewer than the 300 in the last successful sync/);
     expect(res.message).toMatch(/Did not clear customers missing from Sage/);
+
+    const next = await sync(); // still 100 → genuine
+    expect(withBalance()).toBe(100);
+    expect(next.counts.cleared).toBe(200);
+    expect(next.warnings).toEqual([]);
+  });
+
+  it('clears a large backlog in one go when Sage\'s count is steady', async () => {
+    sageRows = Array.from({ length: 300 }, (_, i) => cust(`K${i}`, 10));
+    await sync();
+    // Sage has really returned 100 for a while (e.g. 200 customers long since rolled into national accounts)
+    memDb.prepare('UPDATE databaseconnection SET record_count = 100 WHERE id = ?').run(connId);
+    sageRows = sageRows.slice(0, 100);
+    const res = await sync();
+    expect(res.counts.cleared).toBe(200);
+    expect(res.warnings).toEqual([]);
   });
 
   it('clears nothing when Sage returns no customers at all', async () => {
