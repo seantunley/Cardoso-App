@@ -10,18 +10,20 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import { execFileSync } from 'node:child_process';
 
 const REPO_ROOT = process.cwd();
-const GIT_DIR = path.join(REPO_ROOT, '.git');
 
-if (!fs.existsSync(GIT_DIR)) {
+if (!fs.existsSync(path.join(REPO_ROOT, '.git'))) {
   // Not a git checkout — happens during `npm install` of the published
   // package from npm registry or inside Docker COPY-of-dist images.
   // Silently no-op so install doesn't fail.
   process.exit(0);
 }
 
-const HOOKS_DIR = path.join(GIT_DIR, 'hooks');
+// Ask git where hooks live: in a worktree `.git` is a file, not a folder,
+// and hooks live in the shared git dir (or core.hooksPath if set).
+const HOOKS_DIR = path.resolve(execFileSync('git', ['rev-parse', '--git-path', 'hooks'], { encoding: 'utf8' }).trim());
 const SRC_DIR = path.join(REPO_ROOT, 'scripts', 'hooks');
 
 if (!fs.existsSync(SRC_DIR)) {
