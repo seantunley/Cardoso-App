@@ -118,7 +118,14 @@ app.set('trust proxy', 1);
 app.use(compression());
 
 if (IS_PRODUCTION) {
-  app.use(express.static(path.join(process.cwd(), 'dist')));
+  // Vite's /assets files have content hashes in their names, so they can be
+  // cached forever; index.html keeps the default (revalidate) so new builds
+  // are picked up.
+  app.use(express.static(path.join(process.cwd(), 'dist'), {
+    setHeaders: (res, filePath) => {
+      if (filePath.includes(`${path.sep}assets${path.sep}`)) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    },
+  }));
   app.use(cors({
     origin: (origin, callback) => {
       // Allow all origins — frontend is served by this same server
@@ -149,6 +156,15 @@ const Database = require('better-sqlite3');
 const SqliteStore = require('better-sqlite3-session-store')(session);
 const sessionsDbDir = path.dirname(process.env.DB_PATH || './database/cardoso.db');
 const sessionsDb = new Database(path.join(sessionsDbDir, 'sessions.db'));
+// express-session touches the session row on every logged-in request. With
+// SQLite's default journal that's a synchronous disk flush per API call
+// (~3ms on SSD, far more on a site PC's HDD); WAL + NORMAL makes it ~0.02ms.
+try {
+  sessionsDb.pragma('journal_mode = WAL');
+  sessionsDb.pragma('synchronous = NORMAL');
+} catch (err) {
+  console.error('[session-store] Could not switch sessions.db to WAL (sessions still work, just slower):', err.message);
+}
 
 // Migrate from the old connect-sqlite3 schema if present.
 //
