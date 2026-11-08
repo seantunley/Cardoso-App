@@ -1815,7 +1815,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   });
 
   // Top 10 dead-stock items (held value, no sale in 3+ months) by held value.
-  router.get('/api/reports/dashboard/dead-stock-items', ...reportsGuard, (req, res) => {
+  router.get('/api/reports/dashboard/dead-stock-items', ...reportsGuard, async (req, res) => {
     try {
       const threshold = dashMonth(3);
       if (process.env.HUB_MODE === 'true') {
@@ -1850,7 +1850,10 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
       }
       // Last sale month from the monthly rollup (already trimmed, inter-branch
       // excluded) — the same source the hub card reads. Scanning the raw sales
-      // lines here took ~1.6s per dashboard view.
+      // lines here took ~1.6s per dashboard view. Warm first: on an upgraded site
+      // the rollup can be empty until the next sales sync, which would show
+      // recently sold items as dead stock.
+      await ensureSalesRollupWarm();
       const rows = db.prepare(`
         WITH last_sale AS (
           SELECT item_number, MAX(period) AS last_period
@@ -1880,7 +1883,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   });
 
   // Top 10 customers by sales value, from the per-transaction sales table.
-  router.get('/api/reports/dashboard/top-customers', ...reportsGuard, (req, res) => {
+  router.get('/api/reports/dashboard/top-customers', ...reportsGuard, async (req, res) => {
     try {
       const months = Math.max(0, parseInt(req.query.months, 10) || 12); // default last 12 months; 0 = all time
       const limit = Math.min(1000, Math.max(1, parseInt(req.query.limit, 10) || 10));
@@ -1920,6 +1923,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
       // Monthly customer rollup (trimmed codes, blanks and inter-branch already
       // excluded) — same source as the hub card. Scanning the raw sales lines
       // took 0.7-2s per view.
+      await ensureSalesRollupWarm(); // empty rollup on an upgraded site → would show no customers
       const where = ['1=1'];
       const params = [];
       if (months > 0) {
