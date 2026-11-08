@@ -751,14 +751,21 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
         jobFailures24h = 0;
       }
 
-      // Active (unresolved) alerts.
+      // Active (unresolved) alerts — counts plus the messages themselves, so the
+      // bell and the health panel can say WHAT needs attention (there is no
+      // other screen that lists alerts).
       let activeAlerts = 0;
       let criticalAlerts = 0;
+      let alerts = [];
       try {
         const { getActiveAlerts } = await import('../lib/alertEngine.js');
-        const alerts = getActiveAlerts();
-        activeAlerts = alerts.length;
-        criticalAlerts = alerts.filter((a) => a.severity === 'critical').length;
+        const all = getActiveAlerts();
+        activeAlerts = all.length;
+        criticalAlerts = all.filter((a) => a.severity === 'critical').length;
+        alerts = all
+          .sort((a, b) => (a.severity === 'critical' ? 0 : 1) - (b.severity === 'critical' ? 0 : 1))
+          .slice(0, 10)
+          .map(({ id, rule_name, severity, message, fired_at }) => ({ id, rule_name, severity, message, fired_at }));
       } catch {
         activeAlerts = 0;
       }
@@ -808,6 +815,7 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
         jobFailures24h,
         activeAlerts,
         criticalAlerts,
+        alerts,
         backup,
       });
     } catch (err) {

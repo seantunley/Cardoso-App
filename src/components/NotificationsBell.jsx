@@ -25,8 +25,12 @@ export default function NotificationsBell({ collapsed }) {
     if (data.backup && data.backup.status !== "ok") {
       issues.push(data.backup.status === "critical" ? `Backup problem: ${data.backup.message}` : `Backup unverified`);
     }
-    if (data.criticalAlerts > 0) issues.push(`${data.criticalAlerts} critical alert${data.criticalAlerts === 1 ? "" : "s"}`);
-    else if (data.activeAlerts > 0) issues.push(`${data.activeAlerts} active alert${data.activeAlerts === 1 ? "" : "s"}`);
+    // Each alert's own message (the server sends up to 10, critical first);
+    // the count line only covers any beyond those.
+    const listed = data.alerts || [];
+    for (const a of listed) issues.push(a.message);
+    const more = (data.activeAlerts || 0) - listed.length;
+    if (more > 0) issues.push(`${more} more active alert${more === 1 ? "" : "s"}`);
     if (data.jobFailures24h > 0) issues.push(`${data.jobFailures24h} job failure${data.jobFailures24h === 1 ? "" : "s"} (24h)`);
     if (data.errors24h > 0) issues.push(`${data.errors24h} error${data.errors24h === 1 ? "" : "s"} logged (24h)`);
   }
@@ -55,7 +59,7 @@ export default function NotificationsBell({ collapsed }) {
           <DropdownMenuItem disabled>All clear — nothing needs attention.</DropdownMenuItem>
         ) : (
           issues.map((msg, i) => (
-            <DropdownMenuItem key={i} onClick={() => navigate("/Operations")}>
+            <DropdownMenuItem key={i} onClick={() => navigate("/Operations")} title={msg}>
               <span className={`mr-2 inline-block h-1.5 w-1.5 shrink-0 rounded-full ${dotColor || "bg-muted-foreground"}`} />
               <span className="truncate">{msg}</span>
             </DropdownMenuItem>
