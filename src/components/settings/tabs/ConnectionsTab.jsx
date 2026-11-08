@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { humanizeApiError } from "@/lib/humanizeApiError";
 import { cleanImportToastMessage, resetCleanSyncStreak } from "@/lib/fun";
+import { syncAllConnections } from "@/lib/syncAll";
 
 // UI
 import { Button } from "@/components/ui/button";
@@ -187,9 +188,18 @@ export default function ConnectionsTab({ currentUser }) {
     if (!connections.length) { toast.error("No connections to sync"); return; }
     setIsSyncingAll(true);
     try {
-      let total = 0;
-      for (const c of connections) { const r = await runLocalImport(c.id); total += r.imported || 0; }
-      toast.success(cleanImportToastMessage({ imported: total }));
+      const results = await syncAllConnections(connections, runLocalImport);
+      if (!results.length) toast.error("No connections to sync — BAT-only and switched-off connections are skipped.");
+      const ok = results.filter((r) => r.ok);
+      if (ok.length) {
+        toast.success(cleanImportToastMessage({
+          imported: ok.reduce((s, r) => s + (r.result.imported || 0), 0),
+          summary: ok.map((r) => `${r.conn.name}: ${r.result.message}`).join(" "),
+        }));
+      }
+      for (const r of ok) for (const w of r.result.warnings || []) toast.warning(w, { duration: 15000 });
+      for (const r of results.filter((x) => !x.ok)) toast.error(humanizeApiError(r.error, `sync "${r.conn.name}"`));
+      if (ok.length < results.length) resetCleanSyncStreak();
       queryClient.invalidateQueries({ queryKey: ["connections"] });
       queryClient.invalidateQueries({ queryKey: ["records"] });
     } catch (e) { resetCleanSyncStreak(); toast.error(humanizeApiError(e, "sync all connections")); }
