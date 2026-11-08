@@ -321,6 +321,9 @@ jobs:
             app-v${{ steps.version.outputs.version }}.zip.sha256
             manifest-v${{ steps.version.outputs.version }}.json
           generate_release_notes: true
-          make_latest: true
+          # Every build ships as a pre-release; promote to Latest by hand after testing
+          # (sites only offer the in-app Update button for the Latest release).
+          prerelease: true
+          make_latest: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
