@@ -15,6 +15,7 @@ import InvoiceMatching from '@/components/reconciliation/InvoiceMatching';
 import ReconciliationSummary from '@/components/reconciliation/ReconciliationSummary';
 import ExtractionProgress from '@/components/reconciliation/ExtractionProgress';
 import DashboardOverview from '@/components/reconciliation/DashboardOverview';
+import CrossrefPanel from '@/components/reconciliation/CrossrefPanel';
 import { useColorScheme } from '@/lib/useColorScheme';
 
 // ── Sage status pill ──────────────────────────────────────────────────
@@ -310,9 +311,6 @@ export default function Reconciliation() {
   const [cardosoStats, setCardosoStats] = useState(null);
   const [pendingCardosoFile, setPendingCardosoFile] = useState(null);
   const [showDupePrompt, setShowDupePrompt] = useState(false);
-  const [crossrefYear, setCrossrefYear] = useState('all');
-  const [crossrefWeek, setCrossrefWeek] = useState('all');
-  const [crossrefInvoice, setCrossrefInvoice] = useState('');
   // Mark-week-zero dialog. `markZeroTarget` is { week_number, year } when
   // open, null otherwise. `markZeroNote` and `markZeroBusy` are local
   // form state. Closing resets everything.
@@ -1717,179 +1715,7 @@ export default function Reconciliation() {
                   </div>
                 )}
 
-                {cardosoMatch && (() => {
-                  const allRows = cardosoMatch.results || [];
-                  // Count occurrences of each invoice number across the whole result
-                  // set so we can flag duplicates inline (same number on multiple PODs).
-                  const invCounts = new Map();
-                  for (const r of allRows) {
-                    if (r.extraction_id && r.invoice_number) {
-                      const k = String(r.invoice_number).toUpperCase();
-                      invCounts.set(k, (invCounts.get(k) || 0) + 1);
-                    }
-                  }
-                  const availableYears = Array.from(new Set(allRows.map(r => r.year).filter(Boolean))).sort((a, b) => b - a);
-                  const yearScope = crossrefYear === 'all' ? allRows : allRows.filter(r => String(r.year) === String(crossrefYear));
-                  const availableWeeks = Array.from(new Set(yearScope.map(r => r.week_number).filter(v => v != null))).sort((a, b) => a - b);
-                  const invSearch = crossrefInvoice.trim().toUpperCase();
-                  const filteredRows = yearScope.filter(r =>
-                    (crossrefWeek === 'all' || String(r.week_number) === String(crossrefWeek)) &&
-                    (!invSearch || String(r.invoice_number || '').toUpperCase().includes(invSearch))
-                  );
-                  const filterActive = crossrefYear !== 'all' || crossrefWeek !== 'all' || invSearch !== '';
-                  return (
-                  <>
-                    <div className="grid gap-3 sm:grid-cols-5 stagger-in">
-                      <MatchTile label="Matched" value={cardosoMatch.stats.matched} color="hsl(var(--status-ok))" />
-                      <MatchTile label="Auto-Corrected" value={cardosoMatch.stats.autoCorrections || 0} color="hsl(200 80% 55%)" />
-                      <MatchTile label="Amount Mismatches" value={cardosoMatch.stats.mismatches} color="var(--phosphor)" />
-                      <MatchTile label="BAT Only" value={cardosoMatch.stats.unmatchedSupplier} color="hsl(var(--muted-foreground))" />
-                      <MatchTile label="Cardoso Only" value={cardosoMatch.stats.unmatchedCardoso} color="hsl(var(--destructive))" />
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-3">
-                      <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Filter</span>
-                      <select
-                        value={crossrefYear}
-                        onChange={(e) => { setCrossrefYear(e.target.value); setCrossrefWeek('all'); }}
-                        className="bg-card border border-border text-foreground px-2 py-1.5 font-mono text-xs tabular-nums focus:border-accent outline-none"
-                        style={{ borderRadius: '12px' }}
-                      >
-                        <option value="all">All years</option>
-                        {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
-                      </select>
-                      <select
-                        value={crossrefWeek}
-                        onChange={(e) => setCrossrefWeek(e.target.value)}
-                        className="bg-card border border-border text-foreground px-2 py-1.5 font-mono text-xs tabular-nums focus:border-accent outline-none"
-                        style={{ borderRadius: '12px' }}
-                      >
-                        <option value="all">All weeks</option>
-                        {availableWeeks.map(w => <option key={w} value={w}>Week {w}</option>)}
-                      </select>
-                      <input
-                        type="text"
-                        placeholder="Invoice #"
-                        value={crossrefInvoice}
-                        onChange={(e) => setCrossrefInvoice(e.target.value)}
-                        className="bg-card border border-border text-foreground px-2 py-1.5 font-mono text-xs tabular-nums focus:border-accent outline-none w-32"
-                        style={{ borderRadius: '12px' }}
-                      />
-                      <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground tabular-nums">
-                        {filteredRows.length} of {allRows.length} row{allRows.length !== 1 ? 's' : ''}
-                      </span>
-                      {filterActive && (
-                        <button
-                          onClick={() => { setCrossrefYear('all'); setCrossrefWeek('all'); setCrossrefInvoice(''); }}
-                          className="font-mono text-[10px] uppercase tracking-[0.2em] text-accent hover:text-foreground transition-colors"
-                        >
-                          Clear
-                        </button>
-                      )}
-                    </div>
-
-                    <div className="border overflow-auto max-h-[32rem]" style={{ borderColor: 'hsl(var(--border))', borderRadius: '12px' }}>
-                      <table className="min-w-full text-xs">
-                        <thead className="sticky top-0 z-10" style={{ background: 'hsl(24 8% 11%)' }}>
-                          <tr>
-                            <th className="px-2 py-2 text-left font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground whitespace-nowrap">Invoice</th>
-                            <th className="px-2 py-2 text-left font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground whitespace-nowrap">Week</th>
-                            <th className="px-2 py-2 text-right font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground whitespace-nowrap">BAT Total</th>
-                            <th className="px-2 py-2 text-right font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground whitespace-nowrap">S.Pricing</th>
-                            <th className="px-2 py-2 text-right font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground whitespace-nowrap">S.Discount</th>
-                            <th className="px-2 py-2 text-right font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground whitespace-nowrap">S.DelFee</th>
-                            <th className="px-2 py-2 text-right font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground whitespace-nowrap">Cardoso Total</th>
-                            <th className="px-2 py-2 text-right font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground whitespace-nowrap">C.PriceDiff</th>
-                            <th className="px-2 py-2 text-right font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground whitespace-nowrap">C.Discount</th>
-                            <th className="px-2 py-2 text-right font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground whitespace-nowrap">C.DelFee</th>
-                            <th className="px-2 py-2 text-right font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground whitespace-nowrap">Difference</th>
-                            <th className="px-2 py-2 text-center font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground whitespace-nowrap">Status</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {filteredRows.map((r, i) => (
-                            <tr
-                              key={i}
-                              className="border-t transition-colors hover:bg-muted/30"
-                              style={{
-                                borderColor: 'hsl(var(--border))',
-                                background: r.amount_mismatch ? 'hsla(33, 95%, 55%, 0.04)' : 'hsl(var(--card))',
-                              }}
-                            >
-                              <td className="px-2 py-1.5 font-mono tabular-nums text-foreground whitespace-nowrap">
-                                {r.invoice_number}
-                                {r.is_exception ? <span className="ml-1.5 font-mono text-[9px] uppercase tracking-[0.15em] px-1.5 py-0.5" style={{ color: 'hsl(280 70% 65%)', background: 'hsla(280,70%,55%,0.1)' }}>Exception</span> : null}
-                                {r.auto_corrected && <span className="ml-1.5 font-mono text-[9px] uppercase tracking-[0.15em] px-1 py-0.5" style={{ color: 'hsl(200 80% 55%)', background: 'hsla(200,80%,55%,0.1)' }}>fixed</span>}
-                                {(() => {
-                                  const dc = r.invoice_number ? (invCounts.get(String(r.invoice_number).toUpperCase()) || 0) : 0;
-                                  return dc > 1 ? (
-                                    <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        <span className="ml-1.5 font-mono text-[9px] uppercase tracking-[0.15em] px-1 py-0.5 cursor-help" style={{ color: 'hsl(var(--destructive))', background: 'hsl(var(--status-critical) / 0.12)', border: '1px solid hsl(var(--status-critical) / 0.4)', borderRadius: '12px' }}>×{dc} dup</span>
-                                      </TooltipTrigger>
-                                      <TooltipContent>This invoice number appears on {dc} different POD extractions — at least {dc - 1} are wrong.</TooltipContent>
-                                    </Tooltip>
-                                  ) : null;
-                                })()}
-                              </td>
-                              <td className="px-2 py-1.5 font-mono tabular-nums text-muted-foreground whitespace-nowrap">
-                                <span className="inline-flex items-center gap-1.5">
-                                  <span>{r.week_number ? `W${r.week_number}/${r.year}` : '—'}</span>
-                                  {r.delivery_date && parseInt(r.delivery_date) < new Date().getFullYear() && (
-                                    <span className="font-mono text-[9px] uppercase tracking-[0.15em] px-1.5 py-0.5" style={{ color: 'hsl(var(--status-critical))', background: 'hsl(var(--status-critical) / 0.1)' }}>Delivered last year</span>
-                                  )}
-                                </span>
-                              </td>
-                              <td className="px-2 py-1.5 text-right font-mono tabular-nums text-foreground">
-                                {r.supplier_amount != null ? `R ${r.supplier_amount.toFixed(2)}` : '—'}
-                              </td>
-                              <td className="px-2 py-1.5 text-right font-mono tabular-nums text-muted-foreground">
-                                {r.supplier_pricing != null ? `R ${r.supplier_pricing.toFixed(2)}` : '—'}
-                              </td>
-                              <td className="px-2 py-1.5 text-right font-mono tabular-nums text-muted-foreground">
-                                {r.supplier_discount != null ? `R ${r.supplier_discount.toFixed(2)}` : '—'}
-                              </td>
-                              <td className="px-2 py-1.5 text-right font-mono tabular-nums text-muted-foreground">
-                                {r.supplier_del_fee != null ? `R ${r.supplier_del_fee.toFixed(2)}` : '—'}
-                              </td>
-                              <td className="px-2 py-1.5 text-right font-mono tabular-nums text-foreground">
-                                {r.cardoso_amount != null ? `R ${r.cardoso_amount.toFixed(2)}` : '—'}
-                              </td>
-                              <td className="px-2 py-1.5 text-right font-mono tabular-nums text-muted-foreground">
-                                {r.cardoso_price_diff != null ? `R ${r.cardoso_price_diff.toFixed(2)}` : '—'}
-                              </td>
-                              <td className="px-2 py-1.5 text-right font-mono tabular-nums text-muted-foreground">
-                                {r.cardoso_discount != null ? `R ${r.cardoso_discount.toFixed(2)}` : '—'}
-                              </td>
-                              <td className="px-2 py-1.5 text-right font-mono tabular-nums text-muted-foreground">
-                                {r.cardoso_del_fee != null ? `R ${r.cardoso_del_fee.toFixed(2)}` : '—'}
-                              </td>
-                              <td className="px-2 py-1.5 text-right font-mono tabular-nums" style={{
-                                color: r.difference == null ? 'hsl(var(--muted-foreground))' : Math.abs(r.difference) < 0.01 ? 'hsl(var(--status-ok))' : 'hsl(var(--destructive))',
-                              }}>
-                                {r.difference != null ? `R ${r.difference.toFixed(2)}` : '—'}
-                              </td>
-                              <td className="px-2 py-1.5 text-center">
-                                {r.matched ? (
-                                  r.amount_mismatch ? (
-                                    <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-accent">◐ Mismatch</span>
-                                  ) : (
-                                    <span className="font-mono text-[10px] uppercase tracking-[0.15em]" style={{ color: 'hsl(var(--status-ok))' }}>● Match</span>
-                                  )
-                                ) : r.extraction_id ? (
-                                  <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground">○ BAT only</span>
-                                ) : (
-                                  <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-destructive">▲ Cardoso only</span>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </>
-                  );
-                })()}
+                {cardosoMatch && <CrossrefPanel match={cardosoMatch} />}
               </section>
             )}
 
@@ -2455,24 +2281,6 @@ function DatePickerField({ label, value, onChange }) {
           />
         </PopoverContent>
       </Popover>
-    </div>
-  );
-}
-
-function MatchTile({ label, value, color }) {
-  return (
-    <div
-      className="relative bg-card border border-border p-4 overflow-hidden"
-      style={{ borderRadius: '14px', boxShadow: '0 1px 2px rgba(0,0,0,0.25)' }}
-    >
-      <div
-        className="absolute left-0 right-0 bottom-0 h-[2px]"
-        style={{ background: color, boxShadow: `0 0 10px ${color}40` }}
-      />
-      <div>
-        <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground mb-1.5">{label}</div>
-        <div className="font-display text-3xl leading-none tabular-nums" style={{ color }}>{value}</div>
-      </div>
     </div>
   );
 }
