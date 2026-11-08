@@ -9,7 +9,7 @@
     "server": "node server.js",
     "build": "vite build",
     "start": "cross-env NODE_ENV=production node -r dotenv/config server.js",
-    "lint": "eslint . --quiet",
+    "lint": "eslint . --quiet --cache",
     "lint:fix": "eslint . --fix",
     "test": "vitest run",
     "test:watch": "vitest",
