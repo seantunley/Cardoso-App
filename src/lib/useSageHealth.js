@@ -15,3 +15,16 @@ export function useSageHealth() {
     refetchInterval: 60_000,
   });
 }
+
+// Shared poll of /api/bat/sage-health — the BAT Sage MSSQL probe. Layout's
+// "Sage unreachable" banner and the Reconciliation status pill share this
+// key; every fetch restarts each observer's interval, so with both mounted
+// it is still one request per minute. Pauses while the tab is hidden.
+export function useBatSageHealth({ enabled = true } = {}) {
+  return useQuery({
+    queryKey: ["bat-sage-health"],
+    queryFn: () => apiGet("/api/bat/sage-health"),
+    refetchInterval: 60_000,
+    enabled,
+  });
+}

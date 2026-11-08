@@ -1815,7 +1815,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   });
 
   // Top 10 dead-stock items (held value, no sale in 3+ months) by held value.
-  router.get('/api/reports/dashboard/dead-stock-items', ...reportsGuard, (req, res) => {
+  router.get('/api/reports/dashboard/dead-stock-items', ...reportsGuard, async (req, res) => {
     try {
       const threshold = dashMonth(3);
       if (process.env.HUB_MODE === 'true') {
@@ -1848,12 +1848,17 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
         }));
         return res.json({ threshold_months: 3, rows, hub_mode: true, filters: { sites } });
       }
+      // Last sale month from the monthly rollup (already trimmed, inter-branch
+      // excluded) — the same source the hub card reads. Scanning the raw sales
+      // lines here took ~1.6s per dashboard view. Warm first: on an upgraded site
+      // the rollup can be empty until the next sales sync, which would show
+      // recently sold items as dead stock.
+      await ensureSalesRollupWarm();
       const rows = db.prepare(`
         WITH last_sale AS (
-          SELECT TRIM(item_number) AS item_number, MAX(SUBSTR(transaction_date, 1, 7)) AS last_period
-          FROM inventory_sales_transactions
-          WHERE transaction_date IS NOT NULL AND NOT ${EXCL_INTER_BRANCH}
-          GROUP BY TRIM(item_number)
+          SELECT item_number, MAX(period) AS last_period
+          FROM inventory_item_sales_rollup
+          GROUP BY item_number
         )
         SELECT TRIM(ir.item_number) AS item_number, ir.item_description,
                COALESCE(CAST(REPLACE(REPLACE(ir.inventory_value, ',', ''), ' ', '') AS REAL), 0) AS inv_value,
@@ -1878,7 +1883,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   });
 
   // Top 10 customers by sales value, from the per-transaction sales table.
-  router.get('/api/reports/dashboard/top-customers', ...reportsGuard, (req, res) => {
+  router.get('/api/reports/dashboard/top-customers', ...reportsGuard, async (req, res) => {
     try {
       const months = Math.max(0, parseInt(req.query.months, 10) || 12); // default last 12 months; 0 = all time
       const limit = Math.min(1000, Math.max(1, parseInt(req.query.limit, 10) || 10));
@@ -1915,20 +1920,24 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
         }));
         return res.json({ months, rows, hub_mode: true, filters: { sites } });
       }
-      const where = ["customer_code IS NOT NULL AND TRIM(customer_code) <> ''", `NOT ${EXCL_INTER_BRANCH}`];
+      // Monthly customer rollup (trimmed codes, blanks and inter-branch already
+      // excluded) — same source as the hub card. Scanning the raw sales lines
+      // took 0.7-2s per view.
+      await ensureSalesRollupWarm(); // empty rollup on an upgraded site → would show no customers
+      const where = ['1=1'];
       const params = [];
       if (months > 0) {
         const d = new Date();
         const t = new Date(d.getFullYear(), d.getMonth() - (months - 1), 1);
-        where.push('transaction_date >= ?');
-        params.push(`${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-01`);
+        where.push('period >= ?');
+        params.push(`${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}`);
       }
       const rows = db.prepare(`
-        SELECT TRIM(customer_code) AS customer_code, MAX(customer_name) AS customer_name,
-               SUM(line_amount) AS revenue, SUM(qty_sold) AS qty
-        FROM inventory_sales_transactions
+        SELECT customer_code, MAX(customer_name) AS customer_name,
+               SUM(revenue) AS revenue, SUM(qty) AS qty
+        FROM inventory_customer_sales_rollup
         WHERE ${where.join(' AND ')}
-        GROUP BY TRIM(customer_code)
+        GROUP BY customer_code
         ORDER BY revenue DESC
         LIMIT ?
       `).all(...params, limit).map((r) => ({
@@ -3117,7 +3126,8 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
         );
         const withDesc = (r) => ({ ...r, item_description: descMap.get(r.item_number) || null });
         curRows = curRows.map(withDesc); pyRows = pyRows.map(withDesc);
-        dataFrom = prep('SELECT MIN(SUBSTR(transaction_date, 1, 7)) AS p FROM inventory_sales_transactions').get()?.p || null;
+        // SUBSTR outside MIN so SQLite can read the min straight off the date index.
+        dataFrom = prep('SELECT SUBSTR(MIN(transaction_date), 1, 7) AS p FROM inventory_sales_transactions').get()?.p || null;
       }
       const groups = buildMonthMatrix(curRows, pyRows, months);
       const earliestNeeded = compare ? priorYear(periodFrom) : periodFrom;

@@ -6,6 +6,8 @@ import pluginUnusedImports from "eslint-plugin-unused-imports";
 import pluginJsxA11y from "eslint-plugin-jsx-a11y";
 
 export default [
+  // Build output and scratch files — never lint them (dist/ alone was ~160 files).
+  { ignores: ["dist/**", "tmp/**", "windows/build/**"] },
   {
     files: [
       "src/components/**/*.{js,mjs,cjs,jsx}",

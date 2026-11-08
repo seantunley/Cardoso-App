@@ -293,7 +293,46 @@ function makeEtlGate(database, siteId, freshTokens) {
   };
 }
 
-async function syncSite(site) {
+// ── Time gate for live-Sage aggregate datasets ────────────────────────────
+// The AR document summary and invoice-profit totals have no freshness token:
+// each pull runs a live Sage aggregate on the site. Pulling them every 5-min
+// cycle cost ~576 Sage queries/day/site for figures that rarely move, so they
+// are refreshed at most once per SAGE_AGGREGATE_REFRESH_MS per site. The
+// last-success time lives in hub_site_etl_state under an 'interval:' dataset
+// key (no clash with makeEtlGate's token keys). markPulled() is called only
+// after a pull's write commits, so a failed pull retries on the next cycle.
+// force (manual sync / force-resync / trigger-accpac-sync) bypasses the gate.
+export const SAGE_AGGREGATE_REFRESH_MS = 30 * 60 * 1000;
+
+export function makeIntervalGate(database, siteId, { force = false, now = Date.now() } = {}) {
+  return {
+    due(dataset) {
+      if (force) return true;
+      let last;
+      try {
+        last = database.prepare('SELECT updated_at FROM hub_site_etl_state WHERE site_id = ? AND dataset = ?')
+          .get(siteId, `interval:${dataset}`)?.updated_at;
+      } catch { return true; /* table absent on a partial schema → pull */ }
+      const age = now - Date.parse(last);
+      // NaN (never pulled / unparseable) or negative (clock went back) → pull.
+      return !(age >= 0 && age < SAGE_AGGREGATE_REFRESH_MS);
+    },
+    markPulled(dataset) {
+      const iso = new Date(now).toISOString();
+      try {
+        database.prepare(`
+          INSERT INTO hub_site_etl_state (site_id, dataset, token, updated_at) VALUES (?, ?, ?, ?)
+          ON CONFLICT(site_id, dataset) DO UPDATE SET token = excluded.token, updated_at = excluded.updated_at
+        `).run(siteId, `interval:${dataset}`, iso, iso);
+      } catch (e) {
+        // Not fatal: the data already landed; worst case the next cycle pulls again.
+        console.warn(`[hub-etl] ${siteId} could not record the last successful ${dataset} pull time (${e.message}) — it will be pulled again next cycle instead of waiting 30 minutes.`);
+      }
+    },
+  };
+}
+
+async function syncSite(site, { force = false } = {}) {
   const startedAt = new Date().toISOString();
   let recordsFetched = 0;
   let syncError = null;
@@ -334,6 +373,7 @@ async function syncSite(site) {
     // stages refresh exactly as before (fail-safe — never a stale skip).
     const freshTokens = await fetchEtlFreshness(site, headers);
     const etlGate = makeEtlGate(db, site.id, freshTokens);
+    const sageGate = makeIntervalGate(db, site.id, { force });
 
     // KPIs
     const ctrl2 = new AbortController();
@@ -565,6 +605,9 @@ async function syncSite(site) {
     // AR document summary (per-branch "Sales Figures") — tiny payload (one row
     // per month over the current+prior FY), single fetch. Clear-and-reload the
     // branch's rows each cycle so dropped months don't linger.
+    // Live Sage aggregate on the site → at most every 30 min (makeIntervalGate).
+    arDocStage: {
+    if (!sageGate.due('ar_document_summary')) break arDocStage;
     try {
       const ctrlAr = new AbortController();
       const tAr = setTimeout(() => ctrlAr.abort(), 20000);
@@ -592,9 +635,11 @@ async function syncSite(site) {
           });
         }
       })();
+      sageGate.markPulled('ar_document_summary');
     } catch (e) {
       console.warn(`[HUB] AR document summary sync failed for ${site.slug || site.id}: ${e.message}`);
     }
+    } // end arDocStage
 
     // Invoice profit day totals (per-branch profit by day) — INCREMENTAL.
     //
@@ -611,6 +656,10 @@ async function syncSite(site) {
     //
     // Week, month and year are NOT stored — the hub derives them from these day
     // rows when it renders, so a rollup can never disagree with its own days.
+    //
+    // Live Sage aggregate on the site → at most every 30 min (makeIntervalGate).
+    profitStage: {
+    if (!sageGate.due('invoice_profit_totals')) break profitStage;
     try {
       const isoToday = new Date().toISOString().slice(0, 10);
       const newest = db.prepare('SELECT MAX(day) AS d FROM hub_invoice_profit_day WHERE site_id = ?').get(site.id)?.d;
@@ -663,6 +712,7 @@ async function syncSite(site) {
           });
         }
       })();
+      sageGate.markPulled('invoice_profit_totals');
     } catch (e) {
       // Through recordStageFailure, not a bare console.warn: the footer decides
       // status='partial' from stageErrors, so a warn-only catch recorded the run
@@ -671,6 +721,7 @@ async function syncSite(site) {
       // somewhere true.
       recordStageFailure('Invoice profit totals', e);
     }
+    } // end profitStage
 
     // Inventory movement (sales velocity cache) — paginated fetch using
     // the same pattern as the inventory sync above. Each page is 1000
@@ -1406,7 +1457,9 @@ async function syncSite(site) {
   return { site_id: site.id, site_slug: site.slug, records_fetched: recordsFetched, error: syncError };
 }
 
-async function syncAllSites() {
+// force: a person asked for this sync (manual sync / force-resync) — bypass the
+// 30-min Sage-aggregate gate. The 5-min scheduler calls with no args.
+async function syncAllSites({ force = false } = {}) {
   console.log(`[HUB] Syncing ${HUB_SITES.length} site(s)...`);
   // Bounded concurrency: sync sites in batches of 3 to avoid DB connection exhaustion
   const CONCURRENCY = 3;
@@ -1418,7 +1471,7 @@ async function syncAllSites() {
     // one, the freeze forensics name the site instead of logging a mystery.
     const batchResults = await Promise.allSettled(batch.map((site) => {
       const doneOp = trackOp(`hub-etl:${site.slug || site.id}`);
-      return syncSite(site).finally(doneOp);
+      return syncSite(site, { force }).finally(doneOp);
     }));
     results.push(...batchResults);
   }

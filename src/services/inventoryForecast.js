@@ -82,26 +82,26 @@ export function computeAllForecasts() {
 
   let stdDevByItem = new Map();
   try {
+    // Population variance of daily demand over the days an item sold, in one
+    // pass: var = E[x²] − mean². Was one extra query per item (~1.3k of them),
+    // ~3s of blocking right after the nightly sales sync.
     const rows = db.prepare(`
       SELECT item_number,
-             COUNT(DISTINCT transaction_date) AS days_with_sales,
-             SUM(qty_sold) AS total_qty
-      FROM inventory_sales_transactions
+             COUNT(*) AS days_with_sales,
+             SUM(daily_qty) AS total_qty,
+             SUM(daily_qty * daily_qty) AS total_sq
+      FROM (
+        SELECT item_number, SUM(qty_sold) AS daily_qty
+        FROM inventory_sales_transactions
+        GROUP BY item_number, transaction_date
+      )
       GROUP BY item_number
     `).all();
     for (const r of rows) {
       if (r.days_with_sales > 1) {
         const dailyAvg = r.total_qty / r.days_with_sales;
-        const varRows = db.prepare(`
-          SELECT SUM((daily_qty - ?) * (daily_qty - ?)) / ? AS variance
-          FROM (
-            SELECT SUM(qty_sold) AS daily_qty
-            FROM inventory_sales_transactions
-            WHERE item_number = ?
-            GROUP BY transaction_date
-          )
-        `).get(dailyAvg, dailyAvg, r.days_with_sales, r.item_number);
-        stdDevByItem.set(r.item_number, Math.sqrt(Math.max(0, varRows?.variance || 0)));
+        const variance = r.total_sq / r.days_with_sales - dailyAvg * dailyAvg;
+        stdDevByItem.set(r.item_number, Math.sqrt(Math.max(0, variance || 0)));
       }
     }
   } catch (err) {

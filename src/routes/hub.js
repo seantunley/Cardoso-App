@@ -1253,7 +1253,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
   // (uses the existing syncAllSites function which now also pulls BAT summaries).
   router.post('/api/hub/bat-summary/refresh', requireAuth, requireAdmin, async (req, res) => {
     try {
-      await syncAllSites();
+      await syncAllSites({ force: true });
       res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -1388,6 +1388,10 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       db.prepare('DELETE FROM hub_sync_log').run();
       db.prepare('DELETE FROM hub_records').run();
       db.prepare('DELETE FROM hub_inventory').run();
+      // The ETL skips a dataset whose site token hasn't changed since the last
+      // pull. Forget those tokens too, or the inventory just deleted above is
+      // never re-pulled until the site's next Sage sync changes its token.
+      db.prepare('DELETE FROM hub_site_etl_state').run();
       // Profit day totals are pulled INCREMENTALLY: the ETL resumes from the
       // newest day it already holds. Leaving them here would make a "full
       // re-pull" start 30 days back and quietly keep the very rows the operator
@@ -1399,7 +1403,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         details: 'Cleared hub_records, hub_inventory, hub_sync_log; full pull triggered',
       });
       res.status(202).json({ message: 'Force resync triggered — full pull from all sites' });
-      syncAllSites().catch(err => console.error('[HUB] Force resync error:', err));
+      syncAllSites({ force: true }).catch(err => console.error('[HUB] Force resync error:', err));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -1424,6 +1428,8 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       db.prepare("DELETE FROM hub_sync_log WHERE site_id = ?").run(siteId);
       db.prepare("DELETE FROM hub_records WHERE site_id = ?").run(siteId);
       db.prepare("DELETE FROM hub_inventory WHERE site_id = ?").run(siteId);
+      // See the all-sites route: forget the ETL tokens so the inventory is re-pulled.
+      db.prepare("DELETE FROM hub_site_etl_state WHERE site_id = ?").run(siteId);
       // See the all-sites route: the profit stage resumes from its newest stored
       // day, so it has to be cleared for a force-resync to actually re-pull.
       try { db.prepare("DELETE FROM hub_invoice_profit_day WHERE site_id = ?").run(siteId); } catch { /* table may pre-date the v110 migration */ }
@@ -1433,7 +1439,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         resourceId: siteId, resourceName: site?.name || site?.slug || siteId,
         details: `Cleared site data and triggered full pull for site ${siteId}`,
       });
-      syncAllSites().catch(err => console.error("force-resync error:", err));
+      syncAllSites({ force: true }).catch(err => console.error("force-resync error:", err));
       res.status(202).json({ ok: true });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -1496,6 +1502,8 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         // indexed but not declared as FOREIGN KEYs.
         try { counts.records = db.prepare(`DELETE FROM hub_records WHERE site_id = ?`).run(siteId).changes; } catch { counts.records = 0; }
         try { counts.inventory = db.prepare(`DELETE FROM hub_inventory WHERE site_id = ?`).run(siteId).changes; } catch { counts.inventory = 0; }
+        // ETL tokens — left behind, a re-added site with the same id would skip its inventory pull.
+        try { db.prepare(`DELETE FROM hub_site_etl_state WHERE site_id = ?`).run(siteId); } catch { /* table absent on a partial schema */ }
         try { counts.sync_log = db.prepare(`DELETE FROM hub_sync_log WHERE site_id = ?`).run(siteId).changes; } catch { counts.sync_log = 0; }
         try { counts.backup_integrity = db.prepare(`DELETE FROM hub_backup_integrity WHERE site_id = ?`).run(siteId).changes; } catch { counts.backup_integrity = 0; }
         try { counts.bat_summary = db.prepare(`DELETE FROM hub_bat_summary WHERE site_id = ?`).run(siteId).changes; } catch { counts.bat_summary = 0; }
@@ -1535,6 +1543,8 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
 
       db.prepare('DELETE FROM hub_records WHERE site_id = ?').run(siteId);
       db.prepare('DELETE FROM hub_inventory WHERE site_id = ?').run(siteId);
+      // ETL tokens — left behind, re-adding this site would skip its inventory pull.
+      db.prepare('DELETE FROM hub_site_etl_state WHERE site_id = ?').run(siteId);
       db.prepare('DELETE FROM hub_sync_log WHERE site_id = ?').run(siteId);
       // Keyed by site_id; the weekly report falls back to x.site_id when the
       // hub_sites row is gone, so leftover rows would resurface as stale data.
@@ -1733,7 +1743,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       details: `Manual sync triggered for ${HUB_SITES.length} site(s): ${HUB_SITES.map(s => s.slug).join(', ').slice(0, 200)}`,
     });
     res.status(202).json({ message: 'Sync triggered', sites: HUB_SITES.map(s => s.slug) });
-    syncAllSites().catch(err => console.error('[HUB] Manual sync error:', err));
+    syncAllSites({ force: true }).catch(err => console.error('[HUB] Manual sync error:', err));
   });
 
   // ==================== HUB: CENTRALISED USER MANAGEMENT ====================
@@ -2154,7 +2164,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       let hubPullOk = true;
       let hubPullError = null;
       try {
-        const refreshResult = await syncSite(site);
+        const refreshResult = await syncSite(site, { force: true });
         if (refreshResult?.error) {
           hubPullOk = false;
           hubPullError = String(refreshResult.error);

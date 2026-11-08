@@ -346,6 +346,9 @@ import SidebarHelpSettings from "@/components/SidebarHelpSettings";
 import { buildSettingsTabGroups } from "@/components/settings/settingsTabs";
 import NotificationsBell from "@/components/NotificationsBell";
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { apiGet } from "@/components/collections/utils";
+import { useBatSageHealth } from "@/lib/useSageHealth";
 import { useAuth } from "@/lib/AuthContext";
 import { useAppInfo, useHubMode } from "@/lib/useAppInfo";
 import { hasPermission } from "@/lib/permissions";
@@ -460,19 +463,36 @@ export default function Layout({ children, currentPageName }) {
   });
   const [updateInstalling, setUpdateInstalling] = useState(false);
   const [showUpdateConfirm, setShowUpdateConfirm] = useState(false);
-  const [backupAttention, setBackupAttention] = useState(false);
   const [, setBuildClickCount] = useState(0);
   const [showBuildDiagnostics, setShowBuildDiagnostics] = useState(false);
   const [layoutStartedAt] = useState(() => new Date());
+
+  const { user: currentUser, logout } = useAuth();
+  const isAdmin = currentUser?.role === "admin";
+
   // Sage MSSQL connectivity. When the pool has been failing for >5 min the
   // server-side probe sets attention=true; we render a top-of-page banner
   // so an operator notices before they start chasing "missing credit notes"
   // that's actually just a dead Sage connection. Site-mode only — the hub
-  // doesn't have a Sage connection.
-  const [sageHealth, setSageHealth] = useState(null);
+  // doesn't have a Sage connection — and only for users who can see BAT
+  // (otherwise every tick is a 403). A failed poll keeps the last result;
+  // the Reconciliation pill shows the probe-unreachable state.
+  const sagePollEnabled = !!currentUser && !hubMode
+    && (isAdmin || !!hasPermission(currentUser, "can_access_reconciliation"));
+  const { data: sageData } = useBatSageHealth({ enabled: sagePollEnabled });
+  const sageHealth = sagePollEnabled ? sageData ?? null : null;
 
-  const { user: currentUser, logout } = useAuth();
-  const isAdmin = currentUser?.role === "admin";
+  // Hub nav dot for HubBackups. Same query key as the HubBackups page, so
+  // both mounted = one poll. A failed poll flags attention (fail loud).
+  const backupPollEnabled = !!currentUser && !!hubMode && isAdmin;
+  const { data: backupStatus, isError: backupStatusFailed } = useQuery({
+    queryKey: ["hub-backup-status"],
+    queryFn: () => apiGet("/api/hub/backup-status"),
+    refetchInterval: 60_000,
+    enabled: backupPollEnabled,
+  });
+  const backupAttention = backupPollEnabled
+    && (backupStatusFailed || Boolean(backupStatus?.sql_attention));
 
   // URL-addressable settings. The ?settings query param is the single source
   // of truth for whether the panel is open and which tab it lands on, so a
@@ -520,32 +540,6 @@ export default function Layout({ children, currentPageName }) {
     return () => { isMounted = false; };
   }, [currentUser]);
 
-  useEffect(() => {
-    if (!currentUser || !hubMode || !isAdmin) {
-      setBackupAttention(false);
-      return;
-    }
-
-    let cancelled = false;
-
-    const pollBackupAttention = async () => {
-      try {
-        const res = await fetch("/api/hub/backup-status", { credentials: "include" });
-        const data = res.ok ? await res.json() : null;
-        if (!cancelled) setBackupAttention(Boolean(data?.sql_attention));
-      } catch {
-        if (!cancelled) setBackupAttention(true);
-      }
-    };
-
-    pollBackupAttention();
-    const timer = setInterval(pollBackupAttention, 60_000);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [currentUser, hubMode, isAdmin]);
-
   // Other pages dispatch "open-settings" with an optional tab id to
   // jump straight to a specific section (e.g. the Price List page links
   // to its exclusions tab). Detail: { tab?: string }.
@@ -554,36 +548,6 @@ export default function Layout({ children, currentPageName }) {
     window.addEventListener("open-settings", handler);
     return () => window.removeEventListener("open-settings", handler);
   }, [openSettings]);
-
-  // Sage health poll — site mode only, only for users who can see BAT
-  // (otherwise we'd be making a permission-gated API call that 403s on
-  // every tick for non-BAT users, polluting their browser console).
-  useEffect(() => {
-    if (!currentUser || hubMode) {
-      setSageHealth(null);
-      return;
-    }
-    const canSeeBat = isAdmin || hasPermission(currentUser, "can_access_reconciliation");
-    if (!canSeeBat) return;
-
-    let cancelled = false;
-    const pollSage = async () => {
-      try {
-        const res = await fetch("/api/bat/sage-health", { credentials: "include" });
-        const data = res.ok ? await res.json() : null;
-        if (!cancelled) setSageHealth(data);
-      } catch {
-        // Network blip — don't mark Sage as down on a transient client-side
-        // fetch failure; the next tick will catch a real outage.
-      }
-    };
-    pollSage();
-    const timer = setInterval(pollSage, 60_000);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [currentUser, hubMode, isAdmin]);
 
   const triggerUpdate = async () => {
     if (!isAdmin || updateInstalling) return;
