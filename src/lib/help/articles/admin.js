@@ -158,7 +158,7 @@ export const adminArticles = [
       },
       {
         type: "p",
-        text: "If a customer connection hasn't synced successfully for 2 hours during working hours (Mon–Fri 08:00–18:00), an alert appears in the notifications bell and under Operations → health panel → Active alerts, with the last error. It clears itself after the next successful sync.",
+        text: "If a customer connection goes more than 2 hours of scheduled sync time (weekdays 06:00–17:30 — nights and weekends don't count) without a successful sync, an alert appears for admins in the notifications bell and under Operations → health panel → Active alerts, with the last error. New alerts are raised on weekdays between 08:00 and 18:00, and clear themselves after the next successful sync.",
       },
       {
         type: "steps",
