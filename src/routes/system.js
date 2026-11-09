@@ -1,4 +1,5 @@
 import express from 'express';
+import { writeBackupFile } from '../lib/backupWrite.js';
 import path from 'path';
 import crypto from 'crypto';
 import { spawn } from 'child_process';
@@ -1523,9 +1524,8 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
       const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
       const destPath = path.join(backupDir, `cardoso-${siteId}-${ts}.db`);
       const t0 = Date.now();
-      await db.backup(destPath);
+      const sizeBytes = await writeBackupFile(db, destPath); // .partial until complete
       const elapsedMs = Date.now() - t0;
-      const sizeBytes = fs.statSync(destPath).size;
 
       // Best-effort hub notify. HUB_URL must be configured and the
       // site must have its own REPORTING_TOKEN to authenticate (the

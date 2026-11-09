@@ -14,6 +14,7 @@ import { evaluateAllRules } from './lib/alertRules.js';
 import { pruneResolvedAlerts } from './lib/alertEngine.js';
 import { pruneOldRows, vacuumDb } from './lib/retention.js';
 import { selectPrunableBackups } from './lib/backupPrune.js';
+import { writeBackupFile, removeStalePartials } from './lib/backupWrite.js';
 import { runScheduledMonthlyJob, runBootCatchUp } from './services/jti/jtiScheduler.js';
 import { getJtiSagePool } from './services/jti/jtiPool.js';
 import { pushPendingArchives } from './services/jti/jtiHubPush.js';
@@ -214,26 +215,13 @@ export async function runLocalBackup() {
     const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     const destPath = path.join(backupDir, `cardoso-${siteId}-${ts}.db`);
 
-    // better-sqlite3 async backup — safe with live writes
-    await db.backup(destPath);
-
-    // Sanity-check the artifact actually landed. db.backup() resolving is
-    // not proof a usable file exists — a disk-full / AV-quarantine / perms
-    // edge can leave a missing or 0-byte file. Treat either as a HARD
-    // failure so the run goes red instead of logging "Saved" for nothing.
-    // (This is part of the same fix as the rethrow below: the old code
-    // swallowed every error here, which is how a 12-day backup outage still
-    // reported green.)
-    const { statSync: statBackup } = await import('fs');
-    let backupSize = 0;
-    try {
-      backupSize = statBackup(destPath).size;
-    } catch (statErr) {
-      throw new Error(`backup file missing after db.backup(): ${statErr.message}`);
-    }
-    if (!(backupSize > 0)) {
-      throw new Error(`backup file is ${backupSize} bytes after db.backup() — unusable`);
-    }
+    // better-sqlite3 async backup — safe with live writes. Written to
+    // <name>.partial and renamed only when complete (lib/backupWrite.js), and
+    // checked non-empty: db.backup() resolving is not proof a usable file
+    // exists (disk-full / AV-quarantine / perms). Any of these throws, so the
+    // run goes red instead of logging "Saved" for nothing.
+    try { removeStalePartials(backupDir); } catch (e) { console.warn('[backup] could not clear old .partial files:', e.message); }
+    const backupSize = await writeBackupFile(db, destPath);
     console.log(`[backup] Saved to ${destPath} (${backupSize} bytes)`);
 
     // BAT preview snapshot. The .db backup above only restores OCR text
