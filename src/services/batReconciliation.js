@@ -283,6 +283,7 @@ const _sageHealthState = {
   lastFailAt: null,          // ms timestamp of last failed probe
   lastError: null,           // string of last error message
   consecutiveFailures: 0,    // resets to 0 on success
+  downSince: null,           // ms timestamp of the FIRST failure of the current streak
   lastProbeAt: null,         // when did probe last run
 };
 
@@ -298,12 +299,14 @@ export async function probeSageHealth() {
     _sageHealthState.ok = true;
     _sageHealthState.lastOkAt = Date.now();
     _sageHealthState.consecutiveFailures = 0;
+    _sageHealthState.downSince = null;
     _sageHealthState.lastError = null;
     return _sageHealthState;
   } catch (err) {
     _sageHealthState.ok = false;
     _sageHealthState.lastFailAt = Date.now();
     _sageHealthState.consecutiveFailures += 1;
+    if (_sageHealthState.consecutiveFailures === 1) _sageHealthState.downSince = _sageHealthState.lastFailAt;
     _sageHealthState.lastError = err?.message || String(err);
     // Don't logError on every probe failure — that floods the System Log
     // when Sage is offline. Log only the FIRST failure of a streak.
@@ -331,7 +334,10 @@ export function getSageHealth() {
   // Derive a human-friendly summary on read. The probe loop owns the raw
   // numbers; consumers just read this snapshot.
   const s = _sageHealthState;
-  const downForMs = s.ok === false && s.lastFailAt ? Date.now() - s.lastFailAt : 0;
+  // Measured from the first failure of the streak. lastFailAt moves on every
+  // failed probe (once a minute), so measuring from it always read ~0 minutes
+  // and the health rollup's "Sage down > 5 min" never went critical.
+  const downForMs = s.ok === false && s.downSince ? Date.now() - s.downSince : 0;
   const downForMinutes = Math.floor(downForMs / 60_000);
   return {
     ok: s.ok,
