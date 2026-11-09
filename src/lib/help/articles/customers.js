@@ -150,7 +150,7 @@ export const customersArticles = [
     body: [
       {
         type: "p",
-        text: "Collections keeps each rep on their assigned customers. Auto-detected payments drop off the list; everything else stays until it's actioned manually.",
+        text: "Collections keeps each rep on their assigned customers. Auto-detected payments drop off the list. A customer Sage stops returning (deleted, or moved into a national account) is closed automatically with that reason, not counted as a payment. Everything else stays until it's actioned manually.",
       },
       { type: "h", text: "Worklists" },
       {

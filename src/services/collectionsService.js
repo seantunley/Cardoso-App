@@ -323,26 +323,34 @@ export function listActivityForCustomer(customerId) {
 //
 // The customer sync clears the balance of a customer Sage no longer returns
 // (deleted in Sage, or rolled into a national account whose row now carries the
-// money). That is NOT a payment. Note it on any open assignment and move
-// last_known_balance to 0 in the same step, so processCollectionBalanceDelta
-// (after the sync or from the Collections button) doesn't log "Paid in full" or
-// auto-collect it. The assignment stays open for a person to decide.
+// money). That is NOT a payment, so it must not be logged as "Paid in full" or
+// marked 'collected'. Sean's call (2026-11-09): close the assignment. It's
+// closed as 'closed' with the reason, in the same transaction as the clear, and
+// last_known_balance goes to 0 so processCollectionBalanceDelta sees no drop.
+// Reopen works as for any manual close.
+const CLEARED_BY_SYNC_REASON = 'Customer no longer in Sage (deleted, or moved into a national account). Balance cleared by the customer sync; not a payment.';
+
 export function noteBalanceClearedBySync(customerId) {
   const open = db.prepare(
     "SELECT id, last_known_balance FROM collection_assignment WHERE customer_id = ? AND status = 'active'"
   ).all(String(customerId));
-  const setZero = db.prepare('UPDATE collection_assignment SET last_known_balance = 0, last_sync_at = ? WHERE id = ?');
+  const close = db.prepare(`
+    UPDATE collection_assignment
+    SET status = 'closed', closed_at = ?, closed_reason = ?, last_known_balance = 0, last_sync_at = ?
+    WHERE id = ?
+  `);
   for (const a of open) {
+    const now = nowIso();
+    close.run(now, CLEARED_BY_SYNC_REASON, now, a.id);
     addActivity({
       customerId: String(customerId),
       assignmentId: a.id,
-      kind: 'note',
+      kind: 'status_changed',
       previousBalance: parseAmount(a.last_known_balance),
       newBalance: 0,
       source: 'sync',
-      notes: 'Balance cleared by the customer sync: Sage no longer returns this account (deleted in Sage, or moved into a national account). This is not a payment. Close the assignment if there is nothing left to collect.',
+      notes: `active → closed: ${CLEARED_BY_SYNC_REASON}`,
     });
-    setZero.run(nowIso(), a.id);
   }
   return open.length;
 }

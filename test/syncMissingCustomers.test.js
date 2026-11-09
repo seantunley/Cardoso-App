@@ -127,9 +127,10 @@ it('Collections does not record a cleared balance as a payment; a real drop stil
 
   const acts = (id) => memDb.prepare('SELECT kind, amount, notes FROM collection_activity WHERE assignment_id = ? ORDER BY id').all(id);
   const status = (id) => memDb.prepare('SELECT status FROM collection_assignment WHERE id = ?').get(id).status;
-  expect(acts(aQ).map((a) => a.kind)).toEqual(['note']);
+  expect(acts(aQ).map((a) => a.kind)).toEqual(['status_changed']); // no payment_received
   expect(acts(aQ)[0].notes).toMatch(/not a payment/);
-  expect(status(aQ)).toBe('active');
+  expect(status(aQ)).toBe('closed'); // closed, not 'collected': no money came in
+  expect(memDb.prepare('SELECT closed_reason FROM collection_assignment WHERE id = ?').get(aQ).closed_reason).toMatch(/no longer in Sage/);
   expect(acts(aP)).toMatchObject([{ kind: 'payment_received', amount: 60 }]);
   expect(status(aP)).toBe('active');
 });
