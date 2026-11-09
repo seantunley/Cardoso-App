@@ -10,6 +10,7 @@ import { decryptPassword } from './encryption.js';
 import { trackOp } from '../lib/mainThreadWatch.js';
 import { buildSqlServerConfig } from './mssqlSecurity.js';
 import { buildStatements } from '../db/statements.js';
+import { noteBalanceClearedBySync } from './collectionsService.js';
 import { getMappedOrFallbackValue, firstDefined, buildFieldPatch, buildDynamicLocalFieldsPatch } from '../fieldRegistry.js';
 import { sanitizeForSqlite, parseJsonSafely, stringifyJsonSafely, expandDataRecord } from '../helpers.js';
 import { applyAutoFlagRulesToRecord } from './autoFlag.js';
@@ -93,7 +94,12 @@ export function clearMissingCustomers(sourceName, seenSourceIds, syncTimestamp, 
         age_analysis = '', unpaid_invoices = '[]', updated_date = ?
     WHERE id = ?
   `);
-  db.transaction(() => { for (const r of toClear) clear.run(syncTimestamp, r.id); })();
+  db.transaction(() => {
+    for (const r of toClear) {
+      clear.run(syncTimestamp, r.id);
+      noteBalanceClearedBySync(r.id); // not a payment: keep Collections from logging "Paid in full"
+    }
+  })();
   return { missing: missing.length, cleared: toClear.length };
 }
 

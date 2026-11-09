@@ -319,6 +319,34 @@ export function listActivityForCustomer(customerId) {
   `).all(customerId);
 }
 
+// ── Sync hook: balance cleared because Sage stopped returning the customer ──
+//
+// The customer sync clears the balance of a customer Sage no longer returns
+// (deleted in Sage, or rolled into a national account whose row now carries the
+// money). That is NOT a payment. Note it on any open assignment and move
+// last_known_balance to 0 in the same step, so processCollectionBalanceDelta
+// (after the sync or from the Collections button) doesn't log "Paid in full" or
+// auto-collect it. The assignment stays open for a person to decide.
+export function noteBalanceClearedBySync(customerId) {
+  const open = db.prepare(
+    "SELECT id, last_known_balance FROM collection_assignment WHERE customer_id = ? AND status = 'active'"
+  ).all(String(customerId));
+  const setZero = db.prepare('UPDATE collection_assignment SET last_known_balance = 0, last_sync_at = ? WHERE id = ?');
+  for (const a of open) {
+    addActivity({
+      customerId: String(customerId),
+      assignmentId: a.id,
+      kind: 'note',
+      previousBalance: parseAmount(a.last_known_balance),
+      newBalance: 0,
+      source: 'sync',
+      notes: 'Balance cleared by the customer sync: Sage no longer returns this account (deleted in Sage, or moved into a national account). This is not a payment. Close the assignment if there is nothing left to collect.',
+    });
+    setZero.run(nowIso(), a.id);
+  }
+  return open.length;
+}
+
 // ── Sync hook: auto-payment detection ────────────────────────────
 //
 // Called once per sync round (after datarecord has been updated).
