@@ -283,7 +283,10 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
     // BAT-only connections must NEVER feed datarecord — they're accessed live
     // by the BAT module's own pool. Refuse the import even if invoked manually.
     if (connConfig.is_bat_only) {
-      throw new Error('This connection is marked BAT-only and cannot be synced into the local customer database. Untick "BAT-only" on the connection if you want it to feed customer search.');
+      // A refusal, not a connection failure: flagged so the catch below doesn't
+      // park the (healthy) BAT connection in 'error' — the BAT module's Sage
+      // fallback only picks 'active' connections.
+      throw Object.assign(new Error('This connection is marked BAT-only and cannot be synced into the local customer database. Untick "BAT-only" on the connection if you want it to feed customer search.'), { code: 'BAT_ONLY', statusCode: 400 });
     }
 
     syncRunId = db.prepare(`
@@ -876,6 +879,8 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
       host: connRow?.host,
       database: connRow?.database_name,
     });
+    // A BAT-only refusal is reported to the caller but is not a broken connection.
+    if (error?.code === 'BAT_ONLY') throw error;
     try { logError('sync.import', error, { connection_id: connectionId, sync_run_id: syncRunId, friendly }); }
     catch (e) { console.error('[sync.import.log_error] failed', { connectionId }, e.message); }
     try {

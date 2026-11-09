@@ -234,6 +234,12 @@ export function createConnectionsRouter({ db, requireAuth, requirePermission, is
       const conn = db.prepare('SELECT id, name FROM databaseconnection WHERE id = ?').get(req.params.connectionId);
       try {
         const result = await runConnectionImport(req.params.connectionId, { isShuttingDown });
+        // Another sync of this connection (usually the scheduled one) holds the
+        // lock. Was answered 200 { success: false } and shown as a green
+        // "0 records" toast; say what's actually happening instead.
+        if (result?.skipped) {
+          return res.status(409).json({ error: `A sync for "${conn?.name || 'this connection'}" is already running — it will finish on its own. Try again in a minute to see the result.` });
+        }
         logAudit({
           req, action: 'manual_import', resourceType: 'connection',
           resourceId: req.params.connectionId,
@@ -250,7 +256,7 @@ export function createConnectionsRouter({ db, requireAuth, requirePermission, is
           resourceName: conn?.name || `Connection ${req.params.connectionId}`,
           details: error.message, status: 'failure',
         });
-        res.status(500).json({ error: error.message || 'Import failed' });
+        res.status(error.statusCode || 500).json({ error: error.message || 'Import failed' });
       }
     }
   );

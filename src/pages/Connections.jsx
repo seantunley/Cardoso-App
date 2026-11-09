@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "sonner";
 import { cleanImportToastMessage, getLedgerFortune, resetCleanSyncStreak } from "@/lib/fun";
+import { syncAllConnections } from "@/lib/syncAll";
 import { humanizeApiError } from "@/lib/humanizeApiError";
 import ConnectionCard from "../components/dashboard/ConnectionCard";
 import ConnectionModal from "../components/connections/ConnectionModal";
@@ -291,14 +292,18 @@ export default function Connections() {
     setIsSyncingAll(true);
 
     try {
-      let totalImported = 0;
-
-      for (const connection of connections) {
-        const result = await runLocalImport(connection.id);
-        totalImported += result.imported || 0;
+      const results = await syncAllConnections(connections, runLocalImport);
+      if (!results.length) toast.error("No connections to sync — BAT-only and switched-off connections are skipped.");
+      const ok = results.filter((r) => r.ok);
+      if (ok.length) {
+        toast.success(cleanImportToastMessage({
+          imported: ok.reduce((s, r) => s + (r.result.imported || 0), 0),
+          summary: ok.map((r) => `${r.conn.name}: ${r.result.message}`).join(" "),
+        }));
       }
-
-      toast.success(cleanImportToastMessage({ imported: totalImported }));
+      for (const r of ok) for (const w of r.result.warnings || []) toast.warning(w, { duration: 15000 });
+      for (const r of results.filter((x) => !x.ok)) toast.error(humanizeApiError(r.error, `sync "${r.conn.name}"`));
+      if (ok.length < results.length) resetCleanSyncStreak();
       queryClient.invalidateQueries({ queryKey: ["connections"] });
       queryClient.invalidateQueries({ queryKey: ["records"] });
       queryClient.invalidateQueries({ queryKey: ["reports-records"] });
