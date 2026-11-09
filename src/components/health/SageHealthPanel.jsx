@@ -102,7 +102,7 @@ function AlertList({ alerts, total, onChanged, canAcknowledge }) {
 export default function SageHealthPanel() {
   const [openKey, setOpenKey] = useState(null);
   // Acknowledging is admin-only on the server; only offer it to admins.
-  const isAdmin = useAuth()?.currentUser?.role === "admin";
+  const isAdmin = useAuth()?.user?.role === "admin";
   const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ["sage-health"],
     queryFn: () => apiGet("/api/system/sage-health"),
