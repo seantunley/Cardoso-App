@@ -53,7 +53,7 @@ function OrphanSitesSection() {
       });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
-      toast.success(`Forgot ${orphan.name || orphan.slug}: removed ${data.counts.records} records, ${data.counts.inventory} inventory rows.`);
+      toast.success(`Forgot ${orphan.name || orphan.slug}: removed ${data.counts.hub_records ?? 0} customer records, ${data.counts.hub_inventory ?? 0} inventory rows and the rest of its synced data.`);
       await load();
     } catch (e) {
       toast.error(humanizeApiError(e, `forget ${orphan.name || orphan.slug || orphan.id}`));
