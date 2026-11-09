@@ -751,18 +751,20 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
         jobFailures24h = 0;
       }
 
-      // Active (unresolved) alerts — counts plus the messages themselves, so the
-      // bell and the health panel can say WHAT needs attention (there is no
-      // other screen that lists alerts).
+      // Active (unresolved) alerts — counts for everyone; the messages themselves
+      // for ADMINS ONLY, so the bell and health panel can say WHAT needs
+      // attention. Alert text carries diagnostic and security detail (e.g.
+      // security-signals names IPs), and the alert endpoints are admin-only, so
+      // non-admins keep getting just the counts.
       let activeAlerts = 0;
       let criticalAlerts = 0;
-      let alerts = [];
+      let alerts;
       try {
         const { getActiveAlerts } = await import('../lib/alertEngine.js');
         const all = getActiveAlerts();
         activeAlerts = all.length;
         criticalAlerts = all.filter((a) => a.severity === 'critical').length;
-        alerts = all
+        if (req.currentUser?.role === 'admin') alerts = all
           .sort((a, b) => (a.severity === 'critical' ? 0 : 1) - (b.severity === 'critical' ? 0 : 1))
           .slice(0, 10)
           .map(({ id, rule_name, severity, message, fired_at }) => ({ id, rule_name, severity, message, fired_at }));
