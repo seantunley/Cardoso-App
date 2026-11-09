@@ -113,7 +113,7 @@ import m107 from './v107_bat_order_number_indexes.js';
 import m108 from './v108_bat_preview_pages.js';
 import m109 from './v109_drop_network_devices_feature.js';
 import m110 from './v110_hub_invoice_profit.js';
-import m111 from './v111_collections_relabel_sync_cleared_payments.js';
+import m111 from './v111_collections_review_sync_cleared_payments.js';
 import m112 from './v112_hub_purge_removed_site_data.js';
 
 const migrations = [
