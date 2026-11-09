@@ -11,22 +11,23 @@ function parseAmount(value) {
 // floor is a sentinel, not a real document date — treated as undated so it
 // can neither breach (a "27-year-old unpaid invoice" forcing a permanent
 // hold) nor settle anything.
-const SENTINEL_DATE_FLOOR = new Date("2000-01-01T00:00:00Z");
+const SENTINEL_DATE_FLOOR = new Date(2000, 0, 1);
 
-function parseDateField(value) {
+// Dates are built at LOCAL midnight, like `today` in analyseInvoiceCredit.
+// `new Date("YYYY-MM-DD")` is UTC midnight (02:00 SAST), so every invoice age
+// came out one day short and holds triggered a day late.
+export function parseDateField(value) {
   if (!value) return null;
   const input = String(value).trim();
   let parsed = null;
-  if (/^\d{8}$/.test(input)) parsed = new Date(`${input.slice(0, 4)}-${input.slice(4, 6)}-${input.slice(6, 8)}`);
-  if (!parsed) {
-    const dmy = input.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-    if (dmy) parsed = new Date(`${dmy[3]}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`);
+  let m;
+  if ((m = input.match(/^(\d{4})(\d{2})(\d{2})$/))) parsed = new Date(+m[1], +m[2] - 1, +m[3]);
+  else if ((m = input.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/))) parsed = new Date(+m[3], +m[2] - 1, +m[1]);
+  else if ((m = input.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/))) parsed = new Date(+m[1], +m[2] - 1, +m[3]);
+  else {
+    parsed = new Date(input);
+    if (!Number.isNaN(parsed.getTime())) parsed.setHours(0, 0, 0, 0);
   }
-  if (!parsed) {
-    const mdy = input.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-    if (mdy) parsed = new Date(`${mdy[3]}-${mdy[1].padStart(2, "0")}-${mdy[2].padStart(2, "0")}`);
-  }
-  if (!parsed) parsed = new Date(input);
   if (Number.isNaN(parsed.getTime())) return null;
   if (parsed < SENTINEL_DATE_FLOOR) return null;
   return parsed;

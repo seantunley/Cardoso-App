@@ -2,7 +2,7 @@ import db from '../db/index.js';
 import { expandDataRecord, parseJsonSafely } from '../helpers.js';
 import { getLocalCreditLogicState } from './creditLogic.js';
 import { normaliseCreditLogicConfig } from '../lib/creditLogic.js';
-import { parseCustomerTerms } from '../lib/creditAnalysis.js';
+import { parseCustomerTerms, parseDateField } from '../lib/creditAnalysis.js';
 
 // ─── helpers (mirrors creditAnalysis.js) ───
 //
@@ -18,25 +18,6 @@ function parseAmount(value) {
   if (!value || String(value).trim() === '') return 0;
   const numeric = parseFloat(String(value).replace(/[^0-9.\-]/g, ''));
   return Number.isNaN(numeric) ? 0 : numeric;
-}
-
-// Same sentinel floor as the engine: Sage's "no date" placeholder
-// (1999-12-31) must not read as a real 27-year-old document.
-const SENTINEL_DATE_FLOOR = new Date('2000-01-01T00:00:00Z');
-
-function parseDateField(value) {
-  if (!value) return null;
-  const input = String(value).trim();
-  let parsed = null;
-  if (/^\d{8}$/.test(input)) parsed = new Date(`${input.slice(0, 4)}-${input.slice(4, 6)}-${input.slice(6, 8)}`);
-  if (!parsed) {
-    const dmy = input.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-    if (dmy) parsed = new Date(`${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`);
-  }
-  if (!parsed) parsed = new Date(input);
-  if (Number.isNaN(parsed.getTime())) return null;
-  if (parsed < SENTINEL_DATE_FLOOR) return null;
-  return parsed;
 }
 
 function extractSlots(record, prefix) {
