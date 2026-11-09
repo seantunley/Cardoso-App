@@ -2,7 +2,7 @@ import db from '../db/index.js';
 import { expandDataRecord, parseJsonSafely } from '../helpers.js';
 import { getLocalCreditLogicState } from './creditLogic.js';
 import { normaliseCreditLogicConfig } from '../lib/creditLogic.js';
-import { parseCustomerTerms, parseDateField } from '../lib/creditAnalysis.js';
+import { parseCustomerTerms, parseDateField, formatLocalDate } from '../lib/creditAnalysis.js';
 
 // ─── helpers (mirrors creditAnalysis.js) ───
 //
@@ -62,7 +62,7 @@ function dedupeByNumber(items) {
 }
 
 function fmtDate(d) {
-  return d ? d.toISOString().slice(0, 10) : 'N/A';
+  return formatLocalDate(d) || 'N/A';
 }
 
 function fmtR(n) {
@@ -207,7 +207,7 @@ export function debugCreditForCustomer(customerNumber) {
   const dormantMonths = inactiveDays !== null ? Math.floor(inactiveDays / 30) : null;
   const isDormantReactivation = inactiveDays !== null && inactiveDays > cfg.thresholds.dormantThresholdDays;
   step('Dormancy check', {
-    mostRecentTransaction: mostRecent ? new Date(mostRecent).toISOString().slice(0, 10) : null,
+    mostRecentTransaction: mostRecent ? formatLocalDate(new Date(mostRecent)) : null,
     inactiveDays,
     dormantMonths,
     isDormantReactivation,

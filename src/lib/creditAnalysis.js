@@ -33,6 +33,13 @@ export function parseDateField(value) {
   return parsed;
 }
 
+// "YYYY-MM-DD" of a parsed date's LOCAL day. toISOString().slice(0, 10) would
+// print the previous day: these dates are local midnight, 22:00Z the day before.
+export function formatLocalDate(d) {
+  if (!d) return null;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 function formatTemplate(template, variables = {}) {
   return String(template || "").replace(/{{\s*([\w.]+)\s*}}/g, (_, key) => {
     const value = variables[key];
