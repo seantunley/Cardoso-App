@@ -32,17 +32,22 @@ function verify() {
       return { ok: false, reason: 'integrity_check_failed', issues };
     }
 
-    // Critical tables — if any is present in the live DB but missing/empty in
-    // the backup, the backup is structurally suspect. Wrapped per-table so a
-    // single missing table (fresh install) doesn't fail the whole check.
+    // Critical tables. The schema creates all of them on every install, so a
+    // backup without one can't be restored into a working app: fail it. (This
+    // used to record the error as a "count" and still pass.)
     const counts = {};
+    const missing = [];
     for (const t of criticalTables) {
       try {
         const row = backupDb.prepare(`SELECT COUNT(*) AS c FROM "${t}"`).get();
         counts[t] = row?.c ?? 0;
       } catch (err) {
         counts[t] = `error: ${err.message}`;
+        missing.push(t);
       }
+    }
+    if (missing.length) {
+      return { ok: false, reason: 'critical_table_missing', counts, error: `The backup opens and passes SQLite's integrity check, but these tables can't be read from it: ${missing.join(', ')}. A restore from it would not work.` };
     }
     return { ok: true, counts };
   } catch (err) {
