@@ -304,7 +304,11 @@ export default function InventoryMovement() {
       return d;
     }),
     onSuccess: (data) => {
-      toast.success("Sales data synced", { description: `${data.synced} item-month rows synced from Sage` });
+      if (data.warnings?.length) {
+        toast.warning("Sales synced, with problems", { description: data.warnings.join(" "), duration: 15000 });
+      } else {
+        toast.success("Sales data synced", { description: `${data.synced} item-month rows synced from Sage` });
+      }
       queryClient.invalidateQueries({ queryKey: ["inv-movement-top"] });
       queryClient.invalidateQueries({ queryKey: ["inv-movement-dead"] });
       queryClient.invalidateQueries({ queryKey: ["inv-movement-meta"] });
