@@ -73,4 +73,13 @@ describe('selectPrunableBackups', () => {
     expect(selectPrunableBackups(null, { now: NOW })).toEqual([]);
     expect(selectPrunableBackups([{ name: null }, {}], { now: NOW })).toEqual([]);
   });
+
+  it('never deletes the newest verified backup, even when it is old', () => {
+    // 3 newer backups that are all bad (never verified), and the last good one 10 days old
+    const entries = [mk(1), mk(2), mk(3), mk(10), mk(11)];
+    const lastGood = mk(10).name;
+    const del = selectPrunableBackups(entries, { now: NOW, keepDays: 3, minKeep: 3, protect: [lastGood] });
+    expect(del).not.toContain(lastGood);
+    expect(del).toEqual([mk(11).name]);
+  });
 });

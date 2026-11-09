@@ -315,7 +315,14 @@ export async function runLocalBackup() {
     const entries = readdirSync(backupDir)
       .filter((f) => f.endsWith('.db'))
       .map((f) => ({ name: f, mtime: statSync(path.join(backupDir, f)).mtimeMs }));
-    const toDelete = selectPrunableBackups(entries, { keepDays, minKeep: 3 });
+    // Never prune the newest backup that passed verification (03:30 job), so
+    // there's always one known-good file even after a run of bad backups.
+    let lastVerified = null;
+    try {
+      const row = db.prepare("SELECT context FROM job_runs WHERE name = 'backup-verify' AND status = 'succeeded' ORDER BY started_at DESC LIMIT 1").get();
+      lastVerified = row?.context ? JSON.parse(row.context)?.file || null : null;
+    } catch (e) { console.warn('[backup] could not look up the last verified backup; pruning by age only:', e.message); }
+    const toDelete = selectPrunableBackups(entries, { keepDays, minKeep: 3, protect: lastVerified ? [lastVerified] : [] });
     toDelete.forEach((name) => {
       try { unlinkSync(path.join(backupDir, name)); } catch (e) { console.warn('[scheduler.backup.prune_db]', { file: name }, e.message); }
       // Drop the sibling .previews/ snapshot dir too. Hardlinked files keep the
@@ -339,6 +346,7 @@ export async function runLocalBackup() {
       previews_skipped: skippedCount,
       pruned: toDelete.length,
       kept_days: keepDays,
+      kept_last_verified: lastVerified,
     };
   } catch (err) {
     console.error('[backup] Failed:', err.message);
