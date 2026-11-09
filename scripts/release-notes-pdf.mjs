@@ -1625,6 +1625,99 @@ const RELEASES = {
   ],
   },
 
+  '2026-11-08': {
+    product: 'Cardoso App',
+    title: 'Product Update',
+    date: '08 Nov 2026',
+    slug: '08-Nov-2026',
+    intro:
+      "This update (v2026.5.13) focuses on speed and reliability. The app loads " +
+      "faster across the board — pages without charts start quicker, the dashboard " +
+      "sales cards respond faster, and the BAT Cross-Reference panel scrolls smoothly " +
+      "even with many rows. Customer syncing and the nightly inventory sync are lighter " +
+      "on resources, and four reliability fixes ensure that manual flags, auto-flags, " +
+      "dashboard data, and force-resync all behave correctly.",
+    sections: [
+      {
+        label: 'IMPROVED',
+        heading: 'Improvements',
+        items: [
+          {
+            title: 'Faster page loads and a more responsive app',
+            body:
+              "Several performance improvements make the app noticeably quicker to use. " +
+              "Pages that do not include charts now load faster. The reporting dashboard's " +
+              "sales cards respond more quickly. Status updates across the app share a single " +
+              "background check rather than each running independently, reducing network " +
+              "traffic and keeping the interface snappier.",
+          },
+          {
+            title: 'BAT Cross-Reference panel scrolls smoothly',
+            body:
+              "The Cross-Reference panel in BAT reconciliation now renders only the rows in " +
+              "view, so it stays smooth and responsive even when it contains a large number " +
+              "of entries.",
+          },
+          {
+            title: 'Customer sync is lighter on resources',
+            body:
+              "During data syncing, customers are now written in smaller batches with brief " +
+              "pauses in between. This keeps the application responsive while a sync is " +
+              "running and prevents large syncs from briefly freezing the interface.",
+          },
+          {
+            title: 'Nightly sales sync is faster',
+            body:
+              "The nightly sync now updates only the sales months that have changed, instead " +
+              "of rebuilding the entire history every night. This makes the sync noticeably " +
+              "faster and reduces the work the app does in the background each night.",
+          },
+          {
+            title: 'Hub AR data refreshed efficiently',
+            body:
+              "Accounts receivable document summaries and invoice-profit totals on the hub " +
+              "are now recalculated at most every 30 minutes, preventing unnecessary repeated " +
+              "calculations while keeping figures current.",
+          },
+        ],
+      },
+      {
+        label: 'FIXED',
+        heading: 'Fixes',
+        items: [
+          {
+            title: 'Manual flag changes are correctly recorded',
+            body:
+              "When you manually change a customer flag, it is now correctly recorded as a " +
+              "manual override — ensuring the flag stays in place and is not silently " +
+              "overwritten by an automatic rule on the next sync.",
+          },
+          {
+            title: 'Auto-flags clear when their rule is disabled',
+            body:
+              "Disabling the last active rule that was automatically flagging a set of " +
+              "customers now correctly removes those auto-flags. Previously the flags would " +
+              "remain even though no active rule was responsible for them.",
+          },
+          {
+            title: 'Dashboard sales cards always load correctly',
+            body:
+              "The sales summary cards on the reporting dashboard now warm up the underlying " +
+              "data before displaying it, so they show correct figures even after a fresh " +
+              "setup or when the rollup data has not yet been built.",
+          },
+          {
+            title: 'Force re-sync re-pulls inventory from Sage',
+            body:
+              "When a force re-sync is triggered from the hub, the system now correctly " +
+              "clears cached source tokens so that all inventory data is freshly fetched " +
+              "from Sage rather than using a previous pull.",
+          },
+        ],
+      },
+    ],
+  },
+
   '2026-08-27': {
     product: 'Cardoso App',
     title: 'Product Update',
