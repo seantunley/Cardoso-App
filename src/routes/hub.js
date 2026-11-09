@@ -43,6 +43,7 @@ import {
   getHubCommissionArchive,
 } from '../services/hub/commissionHubReceive.js';
 import fs from 'fs';
+import { purgeSiteData } from '../hub/purgeSiteData.js';
 
 const { sqliteDb: db, repository: hubRepository } = getHubStorageRuntime();
 
@@ -1496,34 +1497,12 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
 
     let counts = {};
     try {
-      const tx = db.transaction(() => {
-        // Order matters only for audit clarity — there are no FK
-        // constraints between these tables; the site_id columns are
-        // indexed but not declared as FOREIGN KEYs.
-        try { counts.records = db.prepare(`DELETE FROM hub_records WHERE site_id = ?`).run(siteId).changes; } catch { counts.records = 0; }
-        try { counts.inventory = db.prepare(`DELETE FROM hub_inventory WHERE site_id = ?`).run(siteId).changes; } catch { counts.inventory = 0; }
-        // ETL tokens — left behind, a re-added site with the same id would skip its inventory pull.
-        try { db.prepare(`DELETE FROM hub_site_etl_state WHERE site_id = ?`).run(siteId); } catch { /* table absent on a partial schema */ }
-        try { counts.sync_log = db.prepare(`DELETE FROM hub_sync_log WHERE site_id = ?`).run(siteId).changes; } catch { counts.sync_log = 0; }
-        try { counts.backup_integrity = db.prepare(`DELETE FROM hub_backup_integrity WHERE site_id = ?`).run(siteId).changes; } catch { counts.backup_integrity = 0; }
-        try { counts.bat_summary = db.prepare(`DELETE FROM hub_bat_summary WHERE site_id = ?`).run(siteId).changes; } catch { counts.bat_summary = 0; }
-        // hub_bat_exceptions is keyed by site_id and the weekly report falls back
-        // to x.site_id when the hub_sites row is gone, so leftover rows would
-        // resurface as stale site-id data after the site is forgotten.
-        try { counts.bat_exceptions = db.prepare(`DELETE FROM hub_bat_exceptions WHERE site_id = ?`).run(siteId).changes; } catch { counts.bat_exceptions = 0; }
-        // Same reasoning as hub_bat_exceptions: the Invoice Profit hub view
-        // falls back to the raw site_id when the hub_sites row is gone, so
-        // leftover day rows would keep this branch's selling, cost and margin in
-        // the consolidated totals after the UI said it was removed.
-        try { counts.invoice_profit_day = db.prepare(`DELETE FROM hub_invoice_profit_day WHERE site_id = ?`).run(siteId).changes; } catch { counts.invoice_profit_day = 0; }
-        counts.site = db.prepare(`DELETE FROM hub_sites WHERE id = ?`).run(siteId).changes;
-      });
-      tx();
+      counts = purgeSiteData(db, siteId);
 
       logAudit({
         req, action: 'hub_forget_orphan_site', resourceType: 'system',
         resourceId: siteId, resourceName: row.name || row.slug || siteId,
-        details: `Forgot orphan site — removed ${counts.site} hub_sites row, ${counts.records} hub_records, ${counts.inventory} hub_inventory, ${counts.sync_log} hub_sync_log, ${counts.backup_integrity} hub_backup_integrity, ${counts.bat_summary} hub_bat_summary, ${counts.bat_exceptions} hub_bat_exceptions, ${counts.invoice_profit_day} hub_invoice_profit_day`,
+        details: `Forgot orphan site — removed ${Object.entries(counts).filter(([, n]) => n).map(([t, n]) => `${n} ${t}`).join(', ') || 'no rows'}`,
         changes: { counts },
       });
 
@@ -1541,24 +1520,13 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       const site = db.prepare('SELECT id, name, slug FROM hub_sites WHERE id = ?').get(siteId);
       if (!site) return res.status(404).json({ error: 'Site not found' });
 
-      db.prepare('DELETE FROM hub_records WHERE site_id = ?').run(siteId);
-      db.prepare('DELETE FROM hub_inventory WHERE site_id = ?').run(siteId);
-      // ETL tokens — left behind, re-adding this site would skip its inventory pull.
-      db.prepare('DELETE FROM hub_site_etl_state WHERE site_id = ?').run(siteId);
-      db.prepare('DELETE FROM hub_sync_log WHERE site_id = ?').run(siteId);
-      // Keyed by site_id; the weekly report falls back to x.site_id when the
-      // hub_sites row is gone, so leftover rows would resurface as stale data.
-      try { db.prepare('DELETE FROM hub_bat_exceptions WHERE site_id = ?').run(siteId); } catch { /* table may pre-date the v105 migration */ }
-      // Profit day totals are keyed by site_id and the hub view falls back to
-      // the raw id, so orphaned rows would keep showing this branch's cost and
-      // margin in consolidated totals after removal.
-      try { db.prepare('DELETE FROM hub_invoice_profit_day WHERE site_id = ?').run(siteId); } catch { /* table may pre-date the v110 migration */ }
-      db.prepare('DELETE FROM hub_sites WHERE id = ?').run(siteId);
+      const counts = purgeSiteData(db, siteId);
 
       logAudit({
         req, action: 'hub_delete_site', resourceType: 'system',
         resourceId: siteId, resourceName: site.name,
         details: `Removed site "${site.name}" (${site.slug || siteId}) and all associated data`,
+        changes: { counts },
       });
 
       res.json({ ok: true, message: `Deleted site "${site.name}" and all its data` });
