@@ -10,6 +10,7 @@ import { logError } from './lib/errorLog.js';
 import { refreshSageWeekTotalsCache, probeSageHealth } from './services/batReconciliation.js';
 import { checkReconciliationIntegrity } from './services/bat/integrity.js';
 import { recordJob, pruneOldJobRuns } from './lib/jobRunner.js';
+import { readLastVerified, recordLastVerified } from './lib/backupPrune.js';
 import { evaluateAllRules } from './lib/alertRules.js';
 import { pruneResolvedAlerts } from './lib/alertEngine.js';
 import { pruneOldRows, vacuumDb } from './lib/retention.js';
@@ -201,6 +202,11 @@ export async function verifyLatestBackup() {
   }
 
   console.log(`[backup-verify] ${latest.name} OK (${ageHours.toFixed(1)}h old, ${JSON.stringify(verifyResult.counts)})`);
+  try { recordLastVerified(backupDir, latest.name); }
+  catch (e) {
+    console.error(`[backup-verify] ${latest.name} passed, but recording it as the last good backup failed: ${e.message}. Pruning protects the previously recorded one until this works.`);
+    try { logError('backup.record_last_verified', e, { file: latest.name }); } catch { /* already on the console */ }
+  }
   return { ok: true, file: latest.name, ageHours, counts: verifyResult.counts };
 }
 
@@ -303,7 +309,19 @@ export async function runLocalBackup() {
     const entries = readdirSync(backupDir)
       .filter((f) => f.endsWith('.db'))
       .map((f) => ({ name: f, mtime: statSync(path.join(backupDir, f)).mtimeMs }));
-    const toDelete = selectPrunableBackups(entries, { keepDays, minKeep: 3 });
+    // Never prune the newest backup that passed verification, so there's always
+    // one known-good file even after a long run of bad backups. Recorded in
+    // backups/last-verified.json by verifyLatestBackup; job_runs is only a
+    // fallback for the first run after upgrading (it's pruned after 30 days).
+    let lastVerified = null;
+    try {
+      lastVerified = readLastVerified(backupDir);
+      if (!lastVerified) {
+        const row = db.prepare("SELECT context FROM job_runs WHERE name = 'backup-verify' AND status = 'succeeded' ORDER BY started_at DESC LIMIT 1").get();
+        lastVerified = row?.context ? JSON.parse(row.context)?.file || null : null;
+      }
+    } catch (e) { console.warn('[backup] could not look up the last verified backup; pruning by age only:', e.message); }
+    const toDelete = selectPrunableBackups(entries, { keepDays, minKeep: 3, protect: lastVerified ? [lastVerified] : [] });
     toDelete.forEach((name) => {
       try { unlinkSync(path.join(backupDir, name)); } catch (e) { console.warn('[scheduler.backup.prune_db]', { file: name }, e.message); }
       // Drop the sibling .previews/ snapshot dir too. Hardlinked files keep the
@@ -327,6 +345,7 @@ export async function runLocalBackup() {
       previews_skipped: skippedCount,
       pruned: toDelete.length,
       kept_days: keepDays,
+      kept_last_verified: lastVerified,
     };
   } catch (err) {
     console.error('[backup] Failed:', err.message);

@@ -1,3 +1,6 @@
+import fs from 'fs';
+import path from 'path';
+
 // Which local .db backups to delete, as a PURE function (no fs/db) so it can be
 // unit-tested — it deletes files, so its selection logic must be provably safe.
 //
@@ -28,11 +31,16 @@
 export const BACKUP_FILE_RE = /^cardoso-.+-\d{4}-\d{2}-\d{2}(?:[-T]\d{2}-\d{2}-\d{2}|_\d{6})\.db$/i;
 
 /**
+ * `protect` names backups that must never be deleted — the caller passes the
+ * newest one that passed verification. Without it, a run of bad backups (cut
+ * off, corrupt) newer than the last good one could age the good one out and
+ * leave only unusable files.
+ *
  * @param {Array<{ name: string, mtime: number }>} entries  every .db file in the backup dir
- * @param {{ now?: number, keepDays?: number, minKeep?: number }} [opts]
+ * @param {{ now?: number, keepDays?: number, minKeep?: number, protect?: string[] }} [opts]
  * @returns {string[]} filenames to delete (only ever real backups)
  */
-export function selectPrunableBackups(entries, { now = Date.now(), keepDays = 3, minKeep = 3 } = {}) {
+export function selectPrunableBackups(entries, { now = Date.now(), keepDays = 3, minKeep = 3, protect = [] } = {}) {
   const days = Number.isFinite(keepDays) && keepDays >= 0 ? keepDays : 3;
   const floor = Number.isFinite(minKeep) && minKeep >= 0 ? minKeep : 3;
   const cutoff = now - days * 86_400_000;
@@ -40,5 +48,27 @@ export function selectPrunableBackups(entries, { now = Date.now(), keepDays = 3,
     .filter((e) => e && typeof e.name === 'string' && BACKUP_FILE_RE.test(e.name))
     .sort((a, b) => b.mtime - a.mtime); // newest first
   // Delete a backup only if it's past the newest `floor` AND older than cutoff.
-  return backups.filter((e, i) => i >= floor && e.mtime < cutoff).map((e) => e.name);
+  return backups.filter((e, i) => i >= floor && e.mtime < cutoff && !protect.includes(e.name)).map((e) => e.name);
+}
+
+// The newest backup that passed verification, kept in a small file next to the
+// backups. Not read from job_runs: that history is pruned, so after a long run
+// of failed verifications the record (and with it the protection) would be lost.
+// Not a .db or .partial file, so verify, prune and backup health ignore it.
+export const LAST_VERIFIED_FILE = 'last-verified.json';
+
+export function recordLastVerified(dir, file, now = new Date()) {
+  const tmp = path.join(dir, `${LAST_VERIFIED_FILE}.tmp`);
+  fs.writeFileSync(tmp, JSON.stringify({ file, verified_at: now.toISOString() }));
+  fs.renameSync(tmp, path.join(dir, LAST_VERIFIED_FILE));
+}
+
+/** @returns {string|null} the file name, or null if none recorded yet */
+export function readLastVerified(dir) {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(dir, LAST_VERIFIED_FILE), 'utf8'))?.file || null;
+  } catch (err) {
+    if (err.code === 'ENOENT') return null;
+    throw err;
+  }
 }
