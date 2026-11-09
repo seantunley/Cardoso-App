@@ -111,3 +111,26 @@ it('the first sync reports new customers and duplicate rows', async () => {
   const res = await sync();
   expect(res.message).toBe('Synced 3 customer rows from Sage: 2 new, 0 updated, 0 unchanged, 1 duplicate rows skipped.');
 });
+
+it('Collections does not record a cleared balance as a payment; a real drop still is', async () => {
+  const { processCollectionBalanceDelta } = await import('../src/services/collectionsService.js');
+  sageRows = [cust('P', 100), cust('Q', 300)];
+  await sync();
+  const wl = memDb.prepare("INSERT INTO collection_worklist (name) VALUES ('Overdue')").run().lastInsertRowid;
+  const assign = memDb.prepare("INSERT INTO collection_assignment (worklist_id, customer_id, last_known_balance) SELECT ?, id, ? FROM datarecord WHERE customer_number = ?");
+  const aP = assign.run(wl, 100, 'P').lastInsertRowid;
+  const aQ = assign.run(wl, 300, 'Q').lastInsertRowid;
+
+  sageRows = [cust('P', 40)]; // P paid 60; Q is no longer returned by Sage
+  await sync();
+  processCollectionBalanceDelta(); // the manual "check balances" path must agree too
+
+  const acts = (id) => memDb.prepare('SELECT kind, amount, notes FROM collection_activity WHERE assignment_id = ? ORDER BY id').all(id);
+  const status = (id) => memDb.prepare('SELECT status FROM collection_assignment WHERE id = ?').get(id).status;
+  expect(acts(aQ).map((a) => a.kind)).toEqual(['status_changed']); // no payment_received
+  expect(acts(aQ)[0].notes).toMatch(/not a payment/);
+  expect(status(aQ)).toBe('closed'); // closed, not 'collected': no money came in
+  expect(memDb.prepare('SELECT closed_reason FROM collection_assignment WHERE id = ?').get(aQ).closed_reason).toMatch(/no longer in Sage/);
+  expect(acts(aP)).toMatchObject([{ kind: 'payment_received', amount: 60 }]);
+  expect(status(aP)).toBe('active');
+});
