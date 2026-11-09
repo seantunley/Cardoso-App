@@ -9,11 +9,16 @@
 // files the site filed, not live figures, and nothing totals them across sites.
 const KEEP = new Set(['hub_jti_archive', 'hub_commission_archive']);
 
-export function purgeSiteData(db, siteId) {
-  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'hub\\_%' ESCAPE '\\'")
+/** Every hub_* table that holds per-site pulled data (has site_id), minus the kept archives. */
+export function siteDataTables(db) {
+  return db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'hub\\_%' ESCAPE '\\'")
     .all()
     .map((r) => r.name)
     .filter((t) => !KEEP.has(t) && db.prepare(`PRAGMA table_info("${t}")`).all().some((c) => c.name === 'site_id'));
+}
+
+export function purgeSiteData(db, siteId) {
+  const tables = siteDataTables(db);
   const counts = {};
   db.transaction(() => {
     // PO lines have no site_id; they hang off their header.
