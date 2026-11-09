@@ -3564,6 +3564,11 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
 
   // GET /api/reporting/records?since=ISO_DATE&offset=0&limit=1000
   router.get('/api/reporting/records', reportingRateLimiter, requireReportingToken, (req, res) => {
+    // Compare as dates, not text. updated_date is stored both as ISO
+    // ("2026-11-09T08:00:00.000Z") and as SQLite CURRENT_TIMESTAMP
+    // ("2026-11-09 08:00:00"); as text a space sorts before "T", so any
+    // same-day record in the space format looked older than the hub's ISO
+    // `since` and was never sent. Uses idx_datarecord_updated_dt.
     const since = req.query.since;
     const { limit, offset } = pagination(req, { defaultLimit: 1000, maxLimit: 1000 });
     let rows;
@@ -3572,14 +3577,14 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
         `SELECT id, customer_number, customer_name, flag_color, flag_reason, flag_created_by,
                 outstanding_balance, unpaid_invoices, receipts, auto_flagged, terms,
                 updated_date, synced_at, source_table, source_id, sales_rep, account_type, data, local_fields
-         FROM datarecord WHERE updated_date > ? ORDER BY updated_date ASC LIMIT ? OFFSET ?`
+         FROM datarecord WHERE datetime(updated_date) > datetime(?) ORDER BY datetime(updated_date) ASC, id ASC LIMIT ? OFFSET ?`
       ).all(since, limit, offset).map(hydrateSalesRepAndAccountType).map(({ data, ...row }) => row);
     } else {
       rows = prep(
         `SELECT id, customer_number, customer_name, flag_color, flag_reason, flag_created_by,
                 outstanding_balance, unpaid_invoices, receipts, auto_flagged, terms,
                 updated_date, synced_at, source_table, source_id, sales_rep, account_type, data, local_fields
-         FROM datarecord ORDER BY updated_date ASC LIMIT ? OFFSET ?`
+         FROM datarecord ORDER BY datetime(updated_date) ASC, id ASC LIMIT ? OFFSET ?`
       ).all(limit, offset).map(hydrateSalesRepAndAccountType).map(({ data, ...row }) => row);
     }
     res.json({

@@ -1433,6 +1433,10 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
           data.flag_source = null;
         }
 
+        // Stamp the edit so the hub's incremental pull picks it up (it only
+        // fetches rows whose updated_date moved since its last run).
+        data.updated_date = new Date().toISOString();
+
         if (data.local_fields !== undefined) {
           data.local_fields = stringifyJsonSafely(
             typeof data.local_fields === 'string' ? parseJsonSafely(data.local_fields, {}) : data.local_fields,
