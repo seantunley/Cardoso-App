@@ -11,13 +11,13 @@ vi.mock('../src/services/batReconciliation.js', () => ({ getSageHealth: () => ({
 vi.mock('../src/lib/backupHealth.js', () => ({ computeBackupHealth: () => ({}) }));
 vi.mock('../src/services/hub/kopiaStatus.js', () => ({ getKopiaStatus: async () => ({}), isKopiaEnabled: () => false }));
 
-let ruleCustomerSyncStale;
+let ruleCustomerSyncStale, syncWindowHoursBetween;
 beforeAll(async () => {
   delete process.env.HUB_MODE;
   (await import('../src/db/batSchema.js')).initBatSchema(memDb);
   (await import('../src/db/schema.js')).initSchema(memDb);
   (await import('../src/db/migrations.js')).runMigrations(memDb);
-  ({ ruleCustomerSyncStale } = await import('../src/lib/alertRules.js'));
+  ({ ruleCustomerSyncStale, syncWindowHoursBetween } = await import('../src/lib/alertRules.js'));
 });
 beforeEach(() => { memDb.exec('DELETE FROM databaseconnection; DELETE FROM alerts;'); });
 
@@ -57,6 +57,37 @@ describe('customer sync stale alert', () => {
     memDb.prepare('UPDATE databaseconnection SET status = ?, last_sync = ? WHERE id = ?').run('active', hoursBefore(WED_10, 0.1), id);
     await ruleCustomerSyncStale(WED_10);
     expect(active()).toEqual([]);
+  });
+
+  it('Friday → Monday: weekend hours do not count, Monday\'s own scheduled runs do', async () => {
+    const sast = (iso) => new Date(`${iso}+02:00`); // SAST wall-clock → Date
+    const MON_0815 = sast('2026-11-16T08:15:00');
+    // Normal Monday: the scheduled runs since 06:00 succeeded (latest at 08:00) → fresh.
+    const ok = addConn('Monday ran', { last_sync: sast('2026-11-16T08:00:30').toISOString() });
+    await ruleCustomerSyncStale(MON_0815);
+    expect(active()).toEqual([]);
+    // No successful run since Friday 17:00 by 08:15 Monday = 0.5h Fri + 2.25h Mon of
+    // missed scheduled time (Mon 06:00-08:00 runs all missing) → alert.
+    memDb.prepare('UPDATE databaseconnection SET last_sync = ? WHERE id = ?').run(sast('2026-11-13T17:00:00').toISOString(), ok);
+    await ruleCustomerSyncStale(MON_0815);
+    expect(active()).toHaveLength(1);
+  });
+
+  it('overnight: Tuesday evening to Wednesday morning is not stale before the window has run for 2h', async () => {
+    const sast = (iso) => new Date(`${iso}+02:00`);
+    addConn('AR', { last_sync: sast('2026-11-10T17:00:00').toISOString() });
+    await ruleCustomerSyncStale(sast('2026-11-11T07:45:00')); // before alert hours anyway
+    await ruleCustomerSyncStale(sast('2026-11-11T08:00:00')); // 0.5h Tue + 2h Wed = 2.5h → stale
+    expect(active()).toHaveLength(1);
+  });
+
+  it('counts only weekday 06:00–17:30 SAST', () => {
+    const sast = (iso) => new Date(`${iso}+02:00`).getTime();
+    const h = (a, b) => syncWindowHoursBetween(sast(a), sast(b), 1000);
+    expect(h('2026-11-13T17:00:00', '2026-11-16T06:00:00')).toBe(0.5); // Fri 17:00 → Mon 06:00
+    expect(h('2026-11-10T17:00:00', '2026-11-11T06:30:00')).toBe(1);   // Tue 17:00 → Wed 06:30
+    expect(h('2026-11-09T09:00:00', '2026-11-09T12:00:00')).toBe(3);   // Mon 09:00 → 12:00
+    expect(h('2026-11-14T00:00:00', '2026-11-15T23:55:00')).toBe(0);   // whole weekend
   });
 
   it('a connection that has never synced alerts only once it has existed past the threshold; switching it off resolves', async () => {
