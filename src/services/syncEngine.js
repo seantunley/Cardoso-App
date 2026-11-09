@@ -148,6 +148,8 @@ async function withSqlRetry(label, fn, { isShuttingDown } = {}) {
       if (!isTransientSqlError(err) || delay === undefined || (isShuttingDown && isShuttingDown())) throw err;
       console.warn(`[sync] ${label} failed with a temporary SQL Server error (${err.code || err.originalError?.code}): ${err.message} — retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 2} of ${sqlRetry.delaysMs.length + 1}).`);
       await new Promise((resolve) => setTimeout(resolve, delay));
+      // Shutdown can start during the pause — don't open another Sage connection then.
+      if (isShuttingDown && isShuttingDown()) throw err;
     }
   }
 }

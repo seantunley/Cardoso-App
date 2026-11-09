@@ -65,6 +65,18 @@ describe('transient SQL Server failures', () => {
     expect(script.query).toEqual([rows]); // the 4th attempt never happened
   });
 
+  it('stops retrying if the server starts shutting down during the pause', async () => {
+    let shuttingDown = false;
+    sqlRetry.delaysMs = [30, 30];
+    script.connect = [undefined];
+    script.query = [sqlErr('ETIMEOUT'), rows];
+    setTimeout(() => { shuttingDown = true; }, 10); // shutdown begins mid-backoff
+    try {
+      await expect(runConnectionImport(connId, { isShuttingDown: () => shuttingDown })).rejects.toThrow(/ETIMEOUT/);
+      expect(script.query).toEqual([rows]); // no second query attempt after shutdown began
+    } finally { sqlRetry.delaysMs = [0, 0]; }
+  });
+
   it('does not retry a real error such as a bad login', async () => {
     script.connect = [sqlErr('ELOGIN', 'Login failed for user'), undefined];
     await expect(runConnectionImport(connId)).rejects.toThrow(/Login failed/);
