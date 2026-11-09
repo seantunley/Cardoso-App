@@ -13,7 +13,8 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, XCircle, RefreshCw } from "lucide-react";
-import { apiGet } from "@/components/collections/utils";
+import { apiGet, apiSend } from "@/components/collections/utils";
+import { useAuth } from "@/lib/AuthContext";
 
 const STATUS_META = {
   ok: { label: "Healthy", dot: "bg-emerald-500", text: "text-emerald-600 dark:text-emerald-400", Icon: CheckCircle2 },
@@ -50,8 +51,58 @@ function Chip({ tone, label, sub, active, onClick, title }) {
   );
 }
 
+// Active alerts, most serious first, each with Acknowledge (admin). An alert
+// whose condition still holds is raised again by the next rule pass (within a
+// minute) — acknowledging hides it only once the cause is fixed.
+function AlertList({ alerts, total, onChanged, canAcknowledge }) {
+  const [busyId, setBusyId] = useState(null);
+  const [error, setError] = useState(null);
+  if (total === 0) return <p className="text-muted-foreground">No active alerts.</p>;
+  // Non-admins get counts only (the server withholds alert text from them).
+  if (!alerts) return <p className="text-muted-foreground">{total} active alert{total === 1 ? "" : "s"} — an administrator can see the details here.</p>;
+  const acknowledge = async (id) => {
+    setBusyId(id);
+    setError(null);
+    try {
+      await apiSend(`/api/system/alerts/${id}/acknowledge`, "POST");
+      onChanged();
+    } catch (e) {
+      setError(`Couldn't acknowledge the alert: ${e.message}`);
+    } finally {
+      setBusyId(null);
+    }
+  };
+  return (
+    <div className="space-y-2">
+      {alerts.map((a) => (
+        <div key={a.id} className="flex items-start gap-2">
+          <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${a.severity === "critical" ? "bg-red-500" : "bg-amber-500"}`} />
+          <p className="flex-1 text-foreground">
+            {a.message}
+            <span className="text-muted-foreground"> · raised {a.fired_at ? new Date(a.fired_at).toLocaleString("en-ZA") : "—"}</span>
+          </p>
+          {canAcknowledge && (
+            <button
+              type="button"
+              onClick={() => acknowledge(a.id)}
+              disabled={busyId === a.id}
+              className="shrink-0 rounded-md border border-border px-2 py-0.5 text-xs text-muted-foreground hover:bg-accent disabled:opacity-50"
+            >
+              {busyId === a.id ? "…" : "Acknowledge"}
+            </button>
+          )}
+        </div>
+      ))}
+      {total > alerts.length && <p className="text-muted-foreground">…and {total - alerts.length} more.</p>}
+      {error && <p className="text-red-600 dark:text-red-400">{error}</p>}
+    </div>
+  );
+}
+
 export default function SageHealthPanel() {
   const [openKey, setOpenKey] = useState(null);
+  // Acknowledging is admin-only on the server; only offer it to admins.
+  const isAdmin = useAuth()?.user?.role === "admin";
   const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ["sage-health"],
     queryFn: () => apiGet("/api/system/sage-health"),
@@ -250,11 +301,7 @@ export default function SageHealthPanel() {
                 </div>
               )}
               {openKey === "alerts" && (
-                <p className="text-muted-foreground">
-                  {data.activeAlerts > 0
-                    ? `${data.activeAlerts} active alert(s)${data.criticalAlerts > 0 ? `, ${data.criticalAlerts} critical` : ""} — see Operations → Alerts.`
-                    : "No active alerts."}
-                </p>
+                <AlertList alerts={data.alerts} total={data.activeAlerts || 0} onChanged={refetch} canAcknowledge={isAdmin} />
               )}
             </div>
           ) : null}

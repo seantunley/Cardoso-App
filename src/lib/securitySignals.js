@@ -193,7 +193,7 @@ export function getSecuritySignals() {
 // ── Alert engine integration ────────────────────────────────────────────────
 //
 // Wires threshold breaches into the existing alertRules engine so they
-// land in the `alerts` table (Operations → Alerts panel) — that's the
+// land in the `alerts` table (Operations → health panel → Active alerts, and the notifications bell) — that's the
 // PERSISTENT record that survives restarts. The in-memory dashboard
 // above is "live view"; the alerts table is the audit trail.
 //
