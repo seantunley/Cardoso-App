@@ -13,7 +13,7 @@ import { recordJob, pruneOldJobRuns } from './lib/jobRunner.js';
 import { evaluateAllRules } from './lib/alertRules.js';
 import { pruneResolvedAlerts } from './lib/alertEngine.js';
 import { pruneOldRows, vacuumDb } from './lib/retention.js';
-import { selectPrunableBackups } from './lib/backupPrune.js';
+import { selectPrunableBackups, readLastVerified, recordLastVerified } from './lib/backupPrune.js';
 import { runScheduledMonthlyJob, runBootCatchUp } from './services/jti/jtiScheduler.js';
 import { getJtiSagePool } from './services/jti/jtiPool.js';
 import { pushPendingArchives } from './services/jti/jtiHubPush.js';
@@ -200,6 +200,11 @@ export async function verifyLatestBackup() {
   }
 
   console.log(`[backup-verify] ${latest.name} OK (${ageHours.toFixed(1)}h old, ${JSON.stringify(verifyResult.counts)})`);
+  try { recordLastVerified(backupDir, latest.name); }
+  catch (e) {
+    console.error(`[backup-verify] ${latest.name} passed, but recording it as the last good backup failed: ${e.message}. Pruning protects the previously recorded one until this works.`);
+    try { logError('backup.record_last_verified', e, { file: latest.name }); } catch { /* already on the console */ }
+  }
   return { ok: true, file: latest.name, ageHours, counts: verifyResult.counts };
 }
 
@@ -315,12 +320,17 @@ export async function runLocalBackup() {
     const entries = readdirSync(backupDir)
       .filter((f) => f.endsWith('.db'))
       .map((f) => ({ name: f, mtime: statSync(path.join(backupDir, f)).mtimeMs }));
-    // Never prune the newest backup that passed verification (03:30 job), so
-    // there's always one known-good file even after a run of bad backups.
+    // Never prune the newest backup that passed verification, so there's always
+    // one known-good file even after a long run of bad backups. Recorded in
+    // backups/last-verified.json by verifyLatestBackup; job_runs is only a
+    // fallback for the first run after upgrading (it's pruned after 30 days).
     let lastVerified = null;
     try {
-      const row = db.prepare("SELECT context FROM job_runs WHERE name = 'backup-verify' AND status = 'succeeded' ORDER BY started_at DESC LIMIT 1").get();
-      lastVerified = row?.context ? JSON.parse(row.context)?.file || null : null;
+      lastVerified = readLastVerified(backupDir);
+      if (!lastVerified) {
+        const row = db.prepare("SELECT context FROM job_runs WHERE name = 'backup-verify' AND status = 'succeeded' ORDER BY started_at DESC LIMIT 1").get();
+        lastVerified = row?.context ? JSON.parse(row.context)?.file || null : null;
+      }
     } catch (e) { console.warn('[backup] could not look up the last verified backup; pruning by age only:', e.message); }
     const toDelete = selectPrunableBackups(entries, { keepDays, minKeep: 3, protect: lastVerified ? [lastVerified] : [] });
     toDelete.forEach((name) => {

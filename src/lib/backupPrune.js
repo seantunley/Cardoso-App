@@ -1,3 +1,6 @@
+import fs from 'fs';
+import path from 'path';
+
 // Which local .db backups to delete, as a PURE function (no fs/db) so it can be
 // unit-tested — it deletes files, so its selection logic must be provably safe.
 //
@@ -46,4 +49,26 @@ export function selectPrunableBackups(entries, { now = Date.now(), keepDays = 3,
     .sort((a, b) => b.mtime - a.mtime); // newest first
   // Delete a backup only if it's past the newest `floor` AND older than cutoff.
   return backups.filter((e, i) => i >= floor && e.mtime < cutoff && !protect.includes(e.name)).map((e) => e.name);
+}
+
+// The newest backup that passed verification, kept in a small file next to the
+// backups. Not read from job_runs: that history is pruned, so after a long run
+// of failed verifications the record (and with it the protection) would be lost.
+// Not a .db or .partial file, so verify, prune and backup health ignore it.
+export const LAST_VERIFIED_FILE = 'last-verified.json';
+
+export function recordLastVerified(dir, file, now = new Date()) {
+  const tmp = path.join(dir, `${LAST_VERIFIED_FILE}.tmp`);
+  fs.writeFileSync(tmp, JSON.stringify({ file, verified_at: now.toISOString() }));
+  fs.renameSync(tmp, path.join(dir, LAST_VERIFIED_FILE));
+}
+
+/** @returns {string|null} the file name, or null if none recorded yet */
+export function readLastVerified(dir) {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(dir, LAST_VERIFIED_FILE), 'utf8'))?.file || null;
+  } catch (err) {
+    if (err.code === 'ENOENT') return null;
+    throw err;
+  }
 }
