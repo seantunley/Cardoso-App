@@ -321,6 +321,88 @@ async function ruleNightlySyncStale() {
   }
 }
 
+// ── Rule: customer sync stale ────────────────────────────────────────────
+//
+// The customer/debtor connections sync every 30 min during business hours.
+// Nothing announced it when that stopped — a failed run used to park the
+// connection in 'error' and the schedulers skipped it from then on, so balances
+// went stale for weeks until a user noticed. This rule alerts on the DATA: if a
+// syncable connection has gone more than CUSTOMER_SYNC_STALE_HOURS of SYNC-WINDOW
+// time (weekdays 06:00-17:30 SAST, when the scheduled syncs run) without a
+// successful sync, fire one deduped warning per connection with the last error.
+// Nights and weekends don't count, so Friday's last sync isn't "60 hours old" on
+// Monday morning — Monday's own 06:00+ runs are what's judged. New alerts are
+// only raised Mon-Fri 08:00-17:59. Resolves on the next successful sync, or when
+// the connection is switched off / deleted. Site-only.
+export const CUSTOMER_SYNC_STALE_HOURS = Number(process.env.CUSTOMER_SYNC_STALE_HOURS) || 2;
+
+const SAST_OFFSET_MS = 2 * 3_600_000; // South Africa has no daylight saving
+function sastClock(ms) {
+  const d = new Date(ms + SAST_OFFSET_MS);
+  return { weekday: d.getUTCDay() >= 1 && d.getUTCDay() <= 5, mins: d.getUTCHours() * 60 + d.getUTCMinutes() };
+}
+// Scheduled customer-sync window: weekdays 06:00-17:30 (30-min runs 06:00-16:30 + the 17:00 catch-up).
+const inSyncWindow = (ms) => { const c = sastClock(ms); return c.weekday && c.mins >= 6 * 60 && c.mins < 17 * 60 + 30; };
+const inAlertHours = (ms) => { const c = sastClock(ms); return c.weekday && c.mins >= 8 * 60 && c.mins < 18 * 60; };
+
+/**
+ * Hours of sync-window time between two instants (5-minute resolution). Stops
+ * counting once past `cap` — callers only need to know whether it's over the
+ * threshold — and never looks back more than 21 days.
+ */
+export function syncWindowHoursBetween(fromMs, toMs, cap) {
+  const STEP = 5 * 60_000;
+  const floor = Math.max(fromMs, toMs - 21 * 24 * 3_600_000);
+  let slots = 0; // whole 5-minute slots, so the total has no floating-point dust
+  for (let t = toMs - STEP; t >= floor; t -= STEP) {
+    if (inSyncWindow(t) && ++slots * 5 > cap * 60) break;
+  }
+  return (slots * 5) / 60;
+}
+
+export async function ruleCustomerSyncStale(now = new Date()) {
+  if (process.env.HUB_MODE === 'true') return;
+  const toMs = (s) => (s ? Date.parse(String(s).includes('T') ? s : `${String(s).replace(' ', 'T')}Z`) || 0 : 0);
+  const conns = _prep('customerSyncConns', `
+    SELECT id, name, status, last_sync, last_error, created_date FROM databaseconnection
+    WHERE status IN ('active', 'error') AND COALESCE(is_bat_only, 0) = 0 AND COALESCE(record_type, 'customer') <> 'inventory'
+  `).all();
+  const staleKeys = new Set();
+  const alertHours = inAlertHours(now.getTime());
+  for (const c of conns) {
+    const key = `customer-sync-stale:${c.id}`;
+    const since = toMs(c.last_sync) || toMs(c.created_date);
+    const ageHours = (now.getTime() - since) / 3_600_000;
+    const missedWindowHours = syncWindowHoursBetween(since, now.getTime(), CUSTOMER_SYNC_STALE_HOURS);
+    if (since && missedWindowHours <= CUSTOMER_SYNC_STALE_HOURS) continue; // fresh → resolved below
+    staleKeys.add(key);
+    if (!alertHours) continue; // stale but quiet hours: keep any open alert, don't raise a new one
+    const when = c.last_sync ? `last synced successfully ${ageHours.toFixed(1)} hours ago` : 'has never synced successfully';
+    const why = c.status === 'error' && c.last_error
+      ? `The last attempt failed: ${c.last_error}. It is retried automatically every 30 minutes.`
+      : 'No successful sync has run since — check that the Cardoso service is running on this machine and that Sage is reachable.';
+    fireAlert({
+      ruleName: 'customer-sync-stale',
+      severity: 'warning',
+      message: `Customer sync '${c.name}' ${when} — more than ${CUSTOMER_SYNC_STALE_HOURS} hours of scheduled sync time (weekdays 06:00–17:30) with no successful sync, so customer balances in the app may be out of date. ${why}`,
+      context: { connection_id: c.id, connection: c.name, last_sync: c.last_sync || null, age_hours: c.last_sync ? Number(ageHours.toFixed(1)) : null, status: c.status, last_error: c.last_error || null },
+      dedupKey: key,
+    });
+  }
+  let actives;
+  try {
+    actives = _prep('activeCustomerSyncStale', `
+      SELECT dedup_key FROM alerts WHERE resolved_at IS NULL AND dedup_key LIKE 'customer-sync-stale:%'
+    `).all();
+  } catch (err) {
+    if (/no such table/i.test(err.message)) return;
+    throw err;
+  }
+  for (const a of actives) {
+    if (!staleKeys.has(a.dedup_key)) resolveAlerts(a.dedup_key, 'auto');
+  }
+}
+
 // ── Rule: JTI monthly export missing ─────────────────────────────────────
 //
 // The JTI Sales export is generated on the 1st at 02:00 (jti-monthly-export),
@@ -640,6 +722,7 @@ const RULES = [
   { name: 'backup-artifact-stale', fn: ruleBackupArtifactStale },
   { name: 'job-failure-spike', fn: ruleJobFailureSpike },
   { name: 'nightly-sync-stale', fn: ruleNightlySyncStale },
+  { name: 'customer-sync-stale', fn: () => ruleCustomerSyncStale() },
   { name: 'jti-export-missing', fn: ruleJtiExportMissing },
   { name: 'kopia-site-stale', fn: ruleKopiaSiteStale },
   // Security signals — brute-force, flood, scanner detection. Rule
