@@ -238,7 +238,7 @@ export function createConnectionsRouter({ db, requireAuth, requirePermission, is
           req, action: 'manual_import', resourceType: 'connection',
           resourceId: req.params.connectionId,
           resourceName: conn?.name || `Connection ${req.params.connectionId}`,
-          details: result?.summary || `Imported ${result?.processed ?? 0} record(s); ${result?.inserted ?? 0} inserted, ${result?.updated ?? 0} updated`,
+          details: result?.message || `Imported ${result?.imported ?? 0} record(s)`,
           changes: result,
         });
         res.json(result);

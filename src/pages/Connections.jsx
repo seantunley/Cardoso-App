@@ -320,7 +320,8 @@ export default function Connections() {
       // Falling back via `result.message ||` would short-circuit on
       // every successful sync since runConnectionImport always returns
       // a non-empty success message. See ConnectionModal.handleImport.
-      toast.success(cleanImportToastMessage({ imported: result.imported || 0, target: connection.name }));
+      toast.success(cleanImportToastMessage({ imported: result.imported || 0, target: connection.name, summary: result.message }));
+      for (const w of result.warnings || []) toast.warning(w, { duration: 15000 });
       queryClient.invalidateQueries({ queryKey: ["connections"] });
       queryClient.invalidateQueries({ queryKey: ["records"] });
       queryClient.invalidateQueries({ queryKey: ["reports-records"] });
