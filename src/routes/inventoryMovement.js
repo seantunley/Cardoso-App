@@ -312,7 +312,7 @@ export function createInventoryMovementRouter({ requireAuth, requireAdmin, requi
         resourceType: 'inventory_sales_cache',
         resourceId: 'sync',
         resourceName: 'Inventory sales sync',
-        details: `Synced ${result.synced} aggregates, ${result.transactions} transactions from Sage`,
+        details: `Synced ${result.synced} aggregates, ${result.transactions} transactions from Sage${result.warnings?.length ? `. Problems: ${result.warnings.join(' ')}` : ''}`,
       });
       res.json({ ok: true, ...result });
     } catch (err) {

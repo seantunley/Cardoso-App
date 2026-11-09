@@ -271,9 +271,21 @@ async function _syncSalesFromSage({ fromDate, toDate } = {}) {
   // The rollup rebuild chunks per month with a yield between (see the function),
   // so it no longer freezes the loop; it self-tracks each chunk for the freeze
   // forensics. Best-effort — a rollup hiccup must not fail the whole sales sync.
+  // A failure here is reported in the result's `sources` (and `warnings`), so the
+  // nightly job is recorded as failed and retried (scheduler nightlySummaryOk)
+  // and the manual Sync button says so, instead of both reading as a success.
+  const warnings = [];
+  const sources = { sales: { rows: aggRows.length, transactions: txnRows.length } };
   let rollupOk = true;
-  try { await rebuildInventorySalesRollups(); }
-  catch (e) { rollupOk = false; console.warn('[inventory.sales_rollup] rebuild failed:', e.message); }
+  try { await rebuildInventorySalesRollups(); sources.rollups = { ok: true }; }
+  catch (e) {
+    rollupOk = false;
+    sources.rollups = { error: e.message };
+    const msg = `Sales lines were synced from Sage, but rebuilding the monthly sales totals failed (${e.message}). Dashboard cards, Sales-by-Vendor and the hub keep showing the previous totals until the next successful sync.`;
+    warnings.push(msg);
+    console.warn('[inventory.sales_rollup]', msg);
+    try { logError('inventory.sales_rollup', e, { note: msg }); } catch { /* never fail the sales sync */ }
+  }
   // Advance the freshness stamp AFTER the rollups are rebuilt+swapped, and ONLY
   // if the rebuild succeeded. The hub gates its inventory-*-sales delete-and-
   // replace on this stamp (+ rollup row counts):
@@ -299,8 +311,10 @@ async function _syncSalesFromSage({ fromDate, toDate } = {}) {
   let itemVendors = 0;
   {
     const done = trackOp('inventory-sales-sync:item-vendors');
-    try { itemVendors = (await syncItemVendors()).synced; }
+    try { itemVendors = (await syncItemVendors()).synced; sources.item_vendors = { rows: itemVendors }; }
     catch (e) {
+      sources.item_vendors = { error: e.message };
+      warnings.push(`The item-to-supplier list could not be refreshed from Sage (${e.message}), so Sales-by-Vendor uses the previous list until the next successful sync.`);
       console.error('[inventory.item_vendor] sync failed — vendor attribution will be stale:', e.message);
       // Surface it, don't just log to console — Sales-by-Vendor shows "(No vendor)"
       // for everything when this fails, and that should be diagnosable.
@@ -308,7 +322,7 @@ async function _syncSalesFromSage({ fromDate, toDate } = {}) {
     }
     finally { done(); }
   }
-  return { synced: aggRows.length, transactions: txnRows.length, itemVendors };
+  return { synced: aggRows.length, transactions: txnRows.length, itemVendors, sources, warnings };
 }
 
 // Sync the item -> primary-vendor map from Sage ICITMV (the item/vendor table).

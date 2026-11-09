@@ -25,9 +25,13 @@ memDb.exec(`
 `);
 
 let sageTxn = [];
+let vendorFails = false;
 const fakePool = {
   request() {
-    const req = { input: () => req, query: async (key) => ({ recordset: key === 'inventory.sales_txn' ? sageTxn : [] }) };
+    const req = { input: () => req, query: async (key) => {
+      if (key === 'inventory.item_vendor' && vendorFails) throw new Error('ICITMV timed out');
+      return { recordset: key === 'inventory.sales_txn' ? sageTxn : [] };
+    } };
     return req;
   },
 };
@@ -97,5 +101,27 @@ describe('syncSalesFromSage per-month swap', () => {
     sageTxn = [sage('ITM1', `${B}-05`, 3), { ...sage('BAD', `${B}-06`, 1), transaction_date_int: null }];
     await expect(syncSalesFromSage()).rejects.toThrow(/no usable transaction date/);
     expect(rows().map((r) => r.item_number)).toEqual(['ITM1']);
+  });
+});
+
+describe('partial failures are reported, not recorded as success', () => {
+  it('a failed rollup rebuild or vendor-map refresh shows in sources and warnings', async () => {
+    sageTxn = [sage('ITM1', `${B}-03`, 1)];
+    const clean = await syncSalesFromSage();
+    expect(clean.warnings).toEqual([]);
+    expect(Object.values(clean.sources).some((x) => x.error)).toBe(false);
+
+    vendorFails = true;
+    memDb.exec('ALTER TABLE inventory_item_sales_rollup RENAME TO broken_rollup');
+    try {
+      const res = await syncSalesFromSage();
+      expect(res.sources.rollups.error).toBeTruthy();
+      expect(res.sources.item_vendors.error).toBe('ICITMV timed out');
+      expect(res.warnings).toHaveLength(2);
+      expect(res.warnings[0]).toMatch(/monthly sales totals failed/);
+    } finally {
+      vendorFails = false;
+      memDb.exec('ALTER TABLE broken_rollup RENAME TO inventory_item_sales_rollup');
+    }
   });
 });
