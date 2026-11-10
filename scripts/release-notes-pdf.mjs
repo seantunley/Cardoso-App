@@ -1625,6 +1625,82 @@ const RELEASES = {
   ],
   },
 
+  '2026-08-28': {
+    product: 'Cardoso App',
+    title: 'Product Update',
+    date: '28 Aug 2026',
+    slug: '28-Aug-2026',
+    intro:
+      "This update introduces the Invoice Profit report — a new view of your " +
+      "trading performance that shows the cost price, selling price, and gross " +
+      "profit on customer invoices (inter-branch depot transfers excluded), " +
+      "grouped by day, week, or month. Drill into any period to see the " +
+      "contributing invoices line by line. On a branch, export a PDF summary " +
+      "or a detailed Excel workbook. At head office, compare profitability " +
+      "across branches in a single view. Every figure is drawn from, and " +
+      "reconciles to, Sage.",
+    sections: [
+      {
+        label: 'NEW',
+        heading: 'New Features',
+        items: [
+          {
+            title: 'Invoice Profit report',
+            body:
+              "A new report shows the cost price, selling price, and gross profit " +
+              "for every invoice, grouped into daily, weekly, or monthly periods. " +
+              "Spot your most and least profitable trading periods at a glance, " +
+              "and drill into any row to see the individual invoices behind the figures.",
+          },
+          {
+            title: 'Invoice line drill-down and export (branch)',
+            body:
+              "On a branch, open any period in the Invoice Profit report to see the " +
+              "individual invoices behind the figure. Export the full date range as a " +
+              "formatted PDF summary (month, week, and day totals) for filing or " +
+              "sharing; detailed per-invoice data is available as an Excel workbook. " +
+              "Both exports are available on branch installs only.",
+          },
+          {
+            title: 'Invoice Profit at head office — branch comparison',
+            body:
+              "Head-office users can view Invoice Profit across all branches in " +
+              "one screen, with Day, Week, Month, and Year totals and a branch " +
+              "drill-down to compare profitability site by site.",
+          },
+        ],
+      },
+      {
+        label: 'IMPROVED',
+        heading: 'Improvements',
+        items: [
+          {
+            title: 'Branch: profit summary strip and filters',
+            body:
+              "On a branch, the Invoice Profit report opens with a summary strip " +
+              "that adapts to the selected date range. For a single-month view the " +
+              "strip shows day-to-date, week-to-date, month-to-date, and range " +
+              "total; across multiple months it shows range total, best month, " +
+              "weakest month, and monthly average. A date-range picker and profit " +
+              "filters let you narrow the figures, and the selection is encoded in " +
+              "the page link for bookmarking and sharing. At head office, a period " +
+              "selector switches between Day, Week, Month, and Year groupings, and " +
+              "a branch selector narrows the view to a single site.",
+          },
+          {
+            title: 'Hub: sync freshness indicator',
+            body:
+              "At head office, the Invoice Profit page shows the oldest branch-to-" +
+              "hub sync time as a headline so you can tell at a glance how current " +
+              "the consolidated figures are. When one or more branches have not " +
+              "synced in over two hours, those branches are named individually with " +
+              "their last sync time.",
+          },
+        ],
+      },
+    ],
+  },
+
   '2026-08-27': {
     product: 'Cardoso App',
     title: 'Product Update',
