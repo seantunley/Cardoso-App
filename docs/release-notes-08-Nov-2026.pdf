@@ -1,0 +1,557 @@
+%PDF-1.3
+%ºß¬à
+3 0 obj
+<</Type /Page
+/Parent 1 0 R
+/Resources 2 0 R
+/MediaBox [0 0 595.2799999999999727 841.8899999999999864]
+/Contents 4 0 R
+>>
+endobj
+4 0 obj
+<<
+/Length 7804
+>>
+stream
+0.5670000000000001 w
+0 G
+0.11 0.15 0.23 rg
+0. 841.8899999999999864 595.2799999999999727 -90.708661417322844 re
+f
+BT
+/F2 18 Tf
+20.6999999999999993 TL
+1. g
+51.0236220472441033 796.5356692913385359 Td
+(Cardoso App) Tj
+ET
+BT
+/F1 11 Tf
+12.6499999999999986 TL
+0.804 0.831 0.871 rg
+51.0236220472441033 773.8585039370078675 Td
+(Product Update) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0.804 0.831 0.871 rg
+487.9563779527558722 773.8585039370078675 Td
+(08 Nov 2026) Tj
+ET
+BT
+/F1 10.5 Tf
+12.0749999999999993 TL
+0.353 0.392 0.451 rg
+51.0236220472441033 717.1655905511811397 Td
+(This update \(v2026.5.13\) focuses on speed and reliability. The app loads faster across the board — pages) Tj
+T* (without charts start quicker, the dashboard sales cards respond faster, and the BAT Cross-Reference) Tj
+T* (panel scrolls smoothly even with many rows. Customer syncing and the nightly inventory sync are lighter) Tj
+T* (on resources, and four reliability fixes ensure that manual flags, auto-flags, dashboard data, and) Tj
+T* (force-resync all behave correctly.) Tj
+ET
+BT
+/F2 13 Tf
+14.9499999999999993 TL
+0.129 0.145 0.161 rg
+51.0236220472441033 626.4569291338582389 Td
+(Improvements) Tj
+ET
+0.15 0.39 0.64 rg
+490.8250787401573803 638.9293700787401349 m
+540.8548031496061412 638.9293700787401349 l
+542.7334410387943535 638.9293700787401349 544.2563779527557699 637.4064331647787185 544.2563779527557699 635.5277952755905062 c
+544.2563779527557699 625.3230708661417339 l
+544.2563779527557699 623.4444329769534079 542.3777400635675576 621.9214960629921052 540.8548031496061412 621.9214960629921052 c
+490.8250787401573803 621.9214960629921052 l
+488.946440850969168 621.9214960629921052 487.4235039370078084 623.8001339521803175 487.4235039370078084 625.3230708661417339 c
+487.4235039370078084 635.5277952755905062 l
+487.4235039370078084 637.4064331647787185 489.3021418261960207 638.9293700787401349 490.8250787401573803 638.9293700787401349 c
+h
+f
+BT
+/F2 7.5 Tf
+8.625 TL
+1. g
+495.9274409448818233 626.4569291338582389 Td
+(IMPROVED) Tj
+ET
+0.87 0.89 0.91 RG
+0.8503937007874016 w
+51.0236220472441033 617.952992125984224 m
+544.2563779527558836 617.952992125984224 l
+S
+0.15 0.39 0.64 rg
+51.0236220472441033 609.4490551181102092 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 600.9451181102361943 Td
+(Faster page loads and a more responsive app) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 586.7718897637794271 Td
+(Several performance improvements make the app noticeably quicker to use. Pages that do not) Tj
+T* (include charts now load faster. The reporting dashboard's sales cards respond more quickly.) Tj
+T* (Status updates across the app share a single background check rather than each running) Tj
+T* (independently, reducing network traffic and keeping the interface snappier.) Tj
+ET
+0.15 0.39 0.64 rg
+51.0236220472441033 528.0947244094487587 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 519.5907874015747439 Td
+(BAT Cross-Reference panel scrolls smoothly) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 505.4175590551180335 Td
+(The Cross-Reference panel in BAT reconciliation now renders only the rows in view, so it stays) Tj
+T* (smooth and responsive even when it contains a large number of entries.) Tj
+ET
+0.15 0.39 0.64 rg
+51.0236220472441033 473.9529921259841672 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 465.4490551181101523 Td
+(Customer sync is lighter on resources) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 451.2758267716534419 Td
+(During data syncing, customers are now written in smaller batches with brief pauses in between.) Tj
+T* (This keeps the application responsive while a sync is running and prevents large syncs from) Tj
+T* (briefly freezing the interface.) Tj
+ET
+0.15 0.39 0.64 rg
+51.0236220472441033 406.2049606299211177 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 397.7010236220471597 Td
+(Nightly sales sync is faster) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 383.5277952755904494 Td
+(The nightly sync now updates only the sales months that have changed, instead of rebuilding) Tj
+T* (the entire history every night. This makes the sync noticeably faster and reduces the work the) Tj
+T* (app does in the background each night.) Tj
+ET
+0.15 0.39 0.64 rg
+51.0236220472441033 338.4569291338581252 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 329.9529921259841103 Td
+(Hub AR data refreshed efficiently) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 315.7797637795274568 Td
+(Accounts receivable document summaries and invoice-profit totals on the hub are now) Tj
+T* (recalculated at most every 30 minutes, preventing unnecessary repeated calculations while) Tj
+T* (keeping figures current.) Tj
+ET
+BT
+/F2 13 Tf
+14.9499999999999993 TL
+0.129 0.145 0.161 rg
+51.0236220472441033 250.8663779527557836 Td
+(Fixes) Tj
+ET
+0.69 0.49 0.09 rg
+508.6750787401573461 263.3388188976376227 m
+540.8548031496061412 263.3388188976376227 l
+542.7334410387943535 263.3388188976376227 544.2563779527557699 261.8158819836762632 544.2563779527557699 259.9372440944880509 c
+544.2563779527557699 249.7325196850392786 l
+544.2563779527557699 247.8538817958510663 542.3777400635675576 246.3309448818896783 540.8548031496061412 246.3309448818896783 c
+508.6750787401573461 246.3309448818896783 l
+506.7964408509691339 246.3309448818896783 505.2735039370077743 248.209582771077919 505.2735039370077743 249.7325196850392786 c
+505.2735039370077743 259.9372440944880509 l
+505.2735039370077743 261.8158819836762632 507.1521418261959866 263.3388188976376227 508.6750787401573461 263.3388188976376227 c
+h
+f
+BT
+/F2 7.5 Tf
+8.625 TL
+1. g
+513.7774409448817323 250.8663779527557836 Td
+(FIXED) Tj
+ET
+0.87 0.89 0.91 RG
+0.8503937007874016 w
+51.0236220472441033 242.3624409448817119 m
+544.2563779527558836 242.3624409448817119 l
+S
+0.69 0.49 0.09 rg
+51.0236220472441033 233.858503937007697 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 225.354566929133739 Td
+(Manual flag changes are correctly recorded) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 211.1813385826769718 Td
+(When you manually change a customer flag, it is now correctly recorded as a manual override —) Tj
+T* (ensuring the flag stays in place and is not silently overwritten by an automatic rule on the next) Tj
+T* (sync.) Tj
+ET
+0.69 0.49 0.09 rg
+51.0236220472441033 166.110472440944676 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 157.6065354330706896 Td
+(Auto-flags clear when their rule is disabled) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 143.4333070866140361 Td
+(Disabling the last active rule that was automatically flagging a set of customers now correctly) Tj
+T* (removes those auto-flags. Previously the flags would remain even though no active rule was) Tj
+T* (responsible for them.) Tj
+ET
+0.87 0.89 0.91 RG
+0.8503937007874016 w
+51.0236220472441033 34.0157480314960665 m
+544.2563779527558836 34.0157480314960665 l
+S
+BT
+/F1 8 Tf
+9.1999999999999993 TL
+0.353 0.392 0.451 rg
+51.0236220472441033 19.8425196850394059 Td
+(Cardoso App · 08 Nov 2026) Tj
+ET
+BT
+/F1 8 Tf
+9.1999999999999993 TL
+0.353 0.392 0.451 rg
+503.6163779527558404 19.8425196850394059 Td
+(Page 1 of 2) Tj
+ET
+endstream
+endobj
+5 0 obj
+<</Type /Page
+/Parent 1 0 R
+/Resources 2 0 R
+/MediaBox [0 0 595.2799999999999727 841.8899999999999864]
+/Contents 6 0 R
+>>
+endobj
+6 0 obj
+<<
+/Length 1573
+>>
+stream
+0.8503937007874016 w
+0.87 0.89 0.91 RG
+0.69 0.49 0.09 rg
+51.0236220472441033 788.0317322834645211 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 779.5277952755905062 Td
+(Dashboard sales cards always load correctly) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 765.3545669291338527 Td
+(The sales summary cards on the reporting dashboard now warm up the underlying data before) Tj
+T* (displaying it, so they show correct figures even after a fresh setup or when the rollup data has) Tj
+T* (not yet been built.) Tj
+ET
+0.69 0.49 0.09 rg
+51.0236220472441033 720.2837007874014716 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 711.7797637795275705 Td
+(Force re-sync re-pulls inventory from Sage) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 697.6065354330708033 Td
+(When a force re-sync is triggered from the hub, the system now correctly clears cached source) Tj
+T* (tokens so that all inventory data is freshly fetched from Sage rather than using a previous pull.) Tj
+ET
+0.87 0.89 0.91 RG
+0.8503937007874016 w
+51.0236220472441033 34.0157480314960665 m
+544.2563779527558836 34.0157480314960665 l
+S
+BT
+/F1 8 Tf
+9.1999999999999993 TL
+0.353 0.392 0.451 rg
+51.0236220472441033 19.8425196850394059 Td
+(Cardoso App · 08 Nov 2026) Tj
+ET
+BT
+/F1 8 Tf
+9.1999999999999993 TL
+0.353 0.392 0.451 rg
+503.6163779527558404 19.8425196850394059 Td
+(Page 2 of 2) Tj
+ET
+endstream
+endobj
+1 0 obj
+<</Type /Pages
+/Kids [3 0 R 5 0 R ]
+/Count 2
+>>
+endobj
+7 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+8 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica-Bold
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+9 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica-Oblique
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+10 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica-BoldOblique
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+11 0 obj
+<<
+/Type /Font
+/BaseFont /Courier
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+12 0 obj
+<<
+/Type /Font
+/BaseFont /Courier-Bold
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+13 0 obj
+<<
+/Type /Font
+/BaseFont /Courier-Oblique
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+14 0 obj
+<<
+/Type /Font
+/BaseFont /Courier-BoldOblique
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+15 0 obj
+<<
+/Type /Font
+/BaseFont /Times-Roman
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+16 0 obj
+<<
+/Type /Font
+/BaseFont /Times-Bold
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+17 0 obj
+<<
+/Type /Font
+/BaseFont /Times-Italic
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+18 0 obj
+<<
+/Type /Font
+/BaseFont /Times-BoldItalic
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+19 0 obj
+<<
+/Type /Font
+/BaseFont /ZapfDingbats
+/Subtype /Type1
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+20 0 obj
+<<
+/Type /Font
+/BaseFont /Symbol
+/Subtype /Type1
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+2 0 obj
+<<
+/ProcSet [/PDF /Text /ImageB /ImageC /ImageI]
+/Font <<
+/F1 7 0 R
+/F2 8 0 R
+/F3 9 0 R
+/F4 10 0 R
+/F5 11 0 R
+/F6 12 0 R
+/F7 13 0 R
+/F8 14 0 R
+/F9 15 0 R
+/F10 16 0 R
+/F11 17 0 R
+/F12 18 0 R
+/F13 19 0 R
+/F14 20 0 R
+>>
+/XObject <<
+>>
+>>
+endobj
+21 0 obj
+<<
+/Producer (jsPDF 4.2.1)
+/CreationDate (D:20261109061425-00'00')
+>>
+endobj
+22 0 obj
+<<
+/Type /Catalog
+/Pages 1 0 R
+/OpenAction [3 0 R /FitH null]
+/PageLayout /OneColumn
+>>
+endobj
+xref
+0 23
+0000000000 65535 f 
+0000009770 00000 n 
+0000011595 00000 n 
+0000000015 00000 n 
+0000000152 00000 n 
+0000008008 00000 n 
+0000008145 00000 n 
+0000009833 00000 n 
+0000009958 00000 n 
+0000010088 00000 n 
+0000010221 00000 n 
+0000010359 00000 n 
+0000010483 00000 n 
+0000010612 00000 n 
+0000010744 00000 n 
+0000010880 00000 n 
+0000011008 00000 n 
+0000011135 00000 n 
+0000011264 00000 n 
+0000011397 00000 n 
+0000011499 00000 n 
+0000011845 00000 n 
+0000011931 00000 n 
+trailer
+<<
+/Size 23
+/Root 22 0 R
+/Info 21 0 R
+/ID [ <562CE4BF972C28C6D195808B7281C97D> <562CE4BF972C28C6D195808B7281C97D> ]
+>>
+startxref
+12035
+%%EOF
