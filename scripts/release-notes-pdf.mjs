@@ -2031,10 +2031,13 @@ const RELEASES = {
               "When a customer's balance was cleared by the nightly data sync rather " +
               "than by an actual payment, Collections could mark the account as 'Paid " +
               "in full'. The logic now correctly distinguishes a sync-cleared balance " +
-              "from a genuine receipt. Historical records mislabelled in earlier " +
-              "versions have been corrected automatically. Additionally, assignments " +
-              "are now closed when a customer is removed from Sage, so the worklist " +
-              "stays up to date.",
+              "from a genuine receipt. Additionally, assignments are now closed when a " +
+              "customer is removed from Sage, so the worklist stays up to date.\n\n" +
+              "If your site ran v2026.5.14 before this update, check the System Log: " +
+              "it lists any assignments suspected of being affected. For each one, " +
+              "verify against Sage — if the customer is no longer there and no payment " +
+              "was received, reopen the assignment, add a note, and close it. No " +
+              "records were changed automatically.",
           },
           {
             title: 'Credit: invoice ages are now calculated in South African days',
