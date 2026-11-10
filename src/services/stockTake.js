@@ -41,16 +41,62 @@ export function normaliseBarcode(raw) {
  * call a mapped item "unknown" and a counter would map it a second time. So
  * every lookup tries both forms, and both are checked before saving.
  *
- * EAN-8 is a genuinely different, shorter symbology and is never padded.
+ * UPC-E (8 digits) is a compressed UPC-A, and many scanners expand it to
+ * UPC-A before sending, so it joins the same family. An 8-digit code counts as
+ * UPC-E only if it starts with 0 or 1 and its check digit matches the expanded
+ * UPC-A. Any other 8-digit code is EAN-8, a different symbology, and is never
+ * padded.
  *
  * @param {string} barcode already through normaliseBarcode()
  * @returns {string[]} the barcode plus any equivalent form
  */
 export function barcodeVariants(barcode) {
-  const out = [barcode];
-  if (/^\d{12}$/.test(barcode)) out.push(`0${barcode}`);
-  else if (/^0\d{12}$/.test(barcode)) out.push(barcode.slice(1));
-  return out;
+  let upcA = null;
+  if (/^\d{12}$/.test(barcode)) upcA = barcode;
+  else if (/^0\d{12}$/.test(barcode)) upcA = barcode.slice(1);
+  else if (/^[01]\d{7}$/.test(barcode)) upcA = expandUpcE(barcode);
+  if (!upcA) return [barcode];
+  return [...new Set([barcode, upcA, `0${upcA}`, ...compressUpcA(upcA)])];
+}
+
+/** UPC check digit for the first 11 digits of a UPC-A. */
+function upcCheckDigit(first11) {
+  let sum = 0;
+  for (let i = 0; i < 11; i++) sum += Number(first11[i]) * (i % 2 === 0 ? 3 : 1);
+  return String((10 - (sum % 10)) % 10);
+}
+
+/**
+ * UPC-E (number system, 6 digits, check) → UPC-A, or null if the check digit
+ * doesn't match.
+ * @param {string} e 8 digits starting 0 or 1
+ */
+export function expandUpcE(e) {
+  const [ns, d1, d2, d3, d4, d5, d6, check] = e;
+  let body;
+  if (d6 <= '2') body = `${d1}${d2}${d6}0000${d3}${d4}${d5}`;
+  else if (d6 === '3') body = `${d1}${d2}${d3}00000${d4}${d5}`;
+  else if (d6 === '4') body = `${d1}${d2}${d3}${d4}00000${d5}`;
+  else body = `${d1}${d2}${d3}${d4}${d5}0000${d6}`;
+  const first11 = ns + body;
+  return upcCheckDigit(first11) === check ? first11 + check : null;
+}
+
+/**
+ * Every UPC-E that expands to this UPC-A (usually none, sometimes two because
+ * the zero-suppression rules overlap).
+ * @param {string} a 12-digit UPC-A
+ */
+function compressUpcA(a) {
+  if (a[0] !== '0' && a[0] !== '1') return [];
+  const ns = a[0], m = a.slice(1, 6), p = a.slice(6, 11), c = a[11];
+  const candidates = [
+    `${ns}${m[0]}${m[1]}${p[2]}${p[3]}${p[4]}${m[2]}${c}`,
+    `${ns}${m[0]}${m[1]}${m[2]}${p[3]}${p[4]}3${c}`,
+    `${ns}${m[0]}${m[1]}${m[2]}${m[3]}${p[4]}4${c}`,
+    `${ns}${m}${p[4]}${c}`,
+  ];
+  return candidates.filter((e) => expandUpcE(e) === a);
 }
 
 function placeholders(n) {

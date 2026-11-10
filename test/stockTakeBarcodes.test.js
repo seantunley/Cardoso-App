@@ -74,6 +74,41 @@ describe('barcodeVariants', () => {
     expect(barcodeVariants('96385074')).toEqual(['96385074']);
     expect(barcodeVariants('6001234567890')).toEqual(['6001234567890']);
   });
+
+  it('expands UPC-E to UPC-A and its EAN-13 form, and back', () => {
+    // Textbook pairs, one per zero-suppression rule.
+    const pairs = [['04252614', '042100005264'], ['01234565', '012345000065'], ['01234531', '012300000451'], ['01234543', '012340000053']];
+    for (const [e, a] of pairs) {
+      expect(barcodeVariants(e)).toEqual(expect.arrayContaining([e, a, `0${a}`]));
+      expect(barcodeVariants(a)).toContain(e);
+      expect(barcodeVariants(`0${a}`)).toContain(e);
+    }
+  });
+
+  it('leaves an 8-digit code alone when its check digit is not a valid UPC-E', () => {
+    expect(barcodeVariants('01234567')).toEqual(['01234567']);
+  });
+});
+
+describe('UPC-E in the map', () => {
+  it('finds a UPC-E label mapped from a scanner that expanded it, and the other way round', () => {
+    saveBarcode({ barcode: '04252614', itemNumber: '110', unit: 'CARTON', user: 'trudy' });
+    expect(lookupBarcode({ barcode: '042100005264' }).unit).toBe('CARTON');
+    expect(lookupBarcode({ barcode: '0042100005264' }).unit).toBe('CARTON');
+    memDb.exec('DELETE FROM item_barcode');
+    saveBarcode({ barcode: '0042100005264', itemNumber: '110', unit: 'EACH', user: 'trudy' });
+    expect(lookupBarcode({ barcode: '04252614' }).unit).toBe('EACH');
+  });
+
+  it('will not map the same label twice under its UPC-E form, and re-points it when confirmed', () => {
+    const first = saveBarcode({ barcode: '042100005264', itemNumber: '110', unit: 'CARTON', user: 'trudy' });
+    expect(() => saveBarcode({ barcode: '04252614', itemNumber: '110', unit: 'EACH', user: 'sean' }))
+      .toThrowError(/already mapped/i);
+    const again = saveBarcode({ barcode: '04252614', itemNumber: '110', unit: 'EACH', user: 'sean', allowRemap: true });
+    expect(again.id).toBe(first.id);
+    expect(memDb.prepare('SELECT COUNT(*) c FROM item_barcode').get().c).toBe(1);
+    expect(lookupBarcode({ barcode: '042100005264' }).unit).toBe('EACH');
+  });
 });
 
 describe('the map', () => {
