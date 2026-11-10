@@ -1963,6 +1963,40 @@ const RELEASES = {
       },
     ],
   },
+
+  '2026-09-24': {
+    product: 'Cardoso App',
+    title: 'Product Update',
+    date: '24 Sep 2026',
+    slug: '24-Sep-2026',
+    intro:
+      "This update makes the Aged Debtors report more trustworthy throughout " +
+      "the working day. A freshness indicator now shows exactly when the figures " +
+      "were last read from Sage, and the ledger syncs at 08:00, 11:00, 14:00 " +
+      "and 17:00 — so the debtors book stays current without waiting for the " +
+      "overnight run.",
+    sections: [
+      {
+        label: 'IMPROVED',
+        heading: 'Improvements',
+        items: [
+          {
+            title: 'Aged Debtors shows data freshness and syncs during the day',
+            body:
+              "The Aged Debtors screen now always displays when the open-item " +
+              "ledger was last read from Sage, in a colour-coded label below the " +
+              "summary tiles — green when current (under 8 hours old), amber as it " +
+              "ages, and red when significantly stale. When the data is more than " +
+              "8 hours old, the label also notes that invoices and receipts posted " +
+              "since are not yet in the figures, so the totals are never silently " +
+              "mistaken for a live balance. The ledger now also syncs at 08:00, " +
+              "11:00, 14:00 and 17:00 in addition to the overnight run, keeping " +
+              "the debtors book current throughout the working day.",
+          },
+        ],
+      },
+    ],
+  },
 };
 
 // Pick the requested release, or the most recent by date.
