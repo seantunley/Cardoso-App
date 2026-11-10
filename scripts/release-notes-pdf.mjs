@@ -1963,6 +1963,137 @@ const RELEASES = {
       },
     ],
   },
+
+  '2026-11-09': {
+    product: 'Cardoso App',
+    title: 'Product Update',
+    date: '9 Nov 2026',
+    slug: '09-Nov-2026',
+    intro:
+      "This update (v2026.5.15) focuses on accuracy, reliability and visibility across " +
+      "Collections, the Hub, Backups and Insights. Collections no longer marks accounts as " +
+      "'Paid in full' based on a sync-cleared balance; credit invoice aging is now " +
+      "calculated in South African days; and the hub sends same-day customer changes " +
+      "immediately. Alerts now show their full text with an Acknowledge button, and a new " +
+      "alert fires when a customer sync connection goes stale. At-risk customer detection " +
+      "in Insights is approximately 75× faster.",
+    sections: [
+      {
+        label: 'NEW',
+        heading: 'New Features',
+        items: [
+          {
+            title: 'Alert when a customer sync connection goes stale',
+            body:
+              "A new alert fires automatically when a customer data connection has not " +
+              "synced within its expected window. Stale branches are now flagged " +
+              "proactively rather than discovered when a figure looks wrong.",
+          },
+          {
+            title: 'Alerts now show their full text with an Acknowledge button',
+            body:
+              "Each alert in the Insights feed now displays the full alert message, " +
+              "giving you the detail needed to act without navigating away. An " +
+              "Acknowledge button lets administrators mark an alert as seen. Alert " +
+              "text and the Acknowledge action are shown only to administrators, " +
+              "keeping the view clean for other users.",
+          },
+        ],
+      },
+      {
+        label: 'IMPROVED',
+        heading: 'Improvements',
+        items: [
+          {
+            title: 'At-risk customer detection in Insights is ~75× faster',
+            body:
+              "The query that identifies at-risk customers has been rewritten. It now " +
+              "completes in roughly 46 ms instead of 3.6 s, so the Insights feed loads " +
+              "and refreshes almost instantly.",
+          },
+          {
+            title: "Sync Now and Sync All report what actually happened",
+            body:
+              "Running a manual sync now shows a clear summary of what each run did — " +
+              "which customers were updated, which were skipped, and any that could no " +
+              "longer be found in Sage. If a sync fails, it retries the connection " +
+              "automatically before giving up.",
+          },
+        ],
+      },
+      {
+        label: 'FIXED',
+        heading: 'Fixes',
+        items: [
+          {
+            title: "Collections no longer labels accounts as 'Paid in full' incorrectly",
+            body:
+              "When a customer's balance was cleared by the nightly data sync rather " +
+              "than by an actual payment, Collections could mark the account as 'Paid " +
+              "in full'. The logic now correctly distinguishes a sync-cleared balance " +
+              "from a genuine receipt. Additionally, assignments are now closed when a " +
+              "customer is removed from Sage, so the worklist stays up to date.\n\n" +
+              "If your site ran v2026.5.14 before this update, check the System Log: " +
+              "it lists any assignments suspected of being affected. For each one, " +
+              "verify against Sage — if the customer is no longer there and no payment " +
+              "was received, reopen the assignment, add a note, and close it. No " +
+              "records were changed automatically.",
+          },
+          {
+            title: 'Credit: invoice ages are now calculated in South African days',
+            body:
+              "Invoice ages in the Credit area were calculated one day shorter than the " +
+              "correct South African (UTC+2) day boundary. Ages now reflect the correct " +
+              "local date, so overdue status and aging buckets match what you see in Sage.",
+          },
+          {
+            title: 'Removing a site from the hub now clears all of its data',
+            body:
+              "When a site was removed from the hub, some customer and reporting " +
+              "records were not deleted. This has been fixed, and any stale data left " +
+              "by previously removed sites has been cleaned up automatically.",
+          },
+          {
+            title: 'Same-day customer changes now reach the hub',
+            body:
+              "Customer records updated in Sage on the same day as a hub sync were " +
+              "sometimes missed. The hub now uses the correct cutoff time so that all " +
+              "changes made on the day of the sync are included. Customers who have " +
+              "been removed from Sage also have their balances cleared promptly.",
+          },
+          {
+            title: 'Backup pruning never removes the most recent verified backup',
+            body:
+              "A logic gap could cause the backup prune to delete the newest verified " +
+              "backup if it fell outside the retention window. The prune now always " +
+              "keeps the most recent verified copy, and remembers which backup was last " +
+              "verified even after the job history is cleared.",
+          },
+          {
+            title: 'An incomplete backup no longer appears healthy',
+            body:
+              "A backup file cut off mid-write (for example, by a system interruption) " +
+              "could previously pass the health check and be reported as a good backup. " +
+              "Incomplete files are now detected and marked as failed.",
+          },
+          {
+            title: '"Sage down for N min" counts from the actual start of the outage',
+            body:
+              "The health indicator showing how long Sage has been unavailable was " +
+              "measuring from the wrong reference point, making outages appear shorter " +
+              "than they were. It now counts from the first moment connectivity was lost.",
+          },
+          {
+            title: 'Inventory sync now reports failures correctly',
+            body:
+              "When the inventory rollup or vendor-refresh step failed during a sync, " +
+              "the job was incorrectly recorded as successful. Failures are now " +
+              "reported accurately in the Job Runs log.",
+          },
+        ],
+      },
+    ],
+  },
 };
 
 // Pick the requested release, or the most recent by date.
