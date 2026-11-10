@@ -1,0 +1,649 @@
+%PDF-1.3
+%ºß¬à
+3 0 obj
+<</Type /Page
+/Parent 1 0 R
+/Resources 2 0 R
+/MediaBox [0 0 595.2799999999999727 841.8899999999999864]
+/Contents 4 0 R
+>>
+endobj
+4 0 obj
+<<
+/Length 8748
+>>
+stream
+0.5670000000000001 w
+0 G
+0.11 0.15 0.23 rg
+0. 841.8899999999999864 595.2799999999999727 -90.708661417322844 re
+f
+BT
+/F2 18 Tf
+20.6999999999999993 TL
+1. g
+51.0236220472441033 796.5356692913385359 Td
+(Cardoso App) Tj
+ET
+BT
+/F1 11 Tf
+12.6499999999999986 TL
+0.804 0.831 0.871 rg
+51.0236220472441033 773.8585039370078675 Td
+(Product Update) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0.804 0.831 0.871 rg
+493.4563779527558154 773.8585039370078675 Td
+(9 Nov 2026) Tj
+ET
+BT
+/F1 10.5 Tf
+12.0749999999999993 TL
+0.353 0.392 0.451 rg
+51.0236220472441033 717.1655905511811397 Td
+(This update \(v2026.5.15\) focuses on accuracy, reliability and visibility across Collections, the Hub,) Tj
+T* (Backups and Insights. Collections no longer marks accounts as 'Paid in full' based on a sync-cleared) Tj
+T* (balance; credit invoice aging is now calculated in South African days; and the hub sends same-day) Tj
+T* (customer changes immediately. Alerts now show their full text with an Acknowledge button, and a new) Tj
+T* (alert fires when a customer sync connection goes stale. At-risk customer detection in Insights is) Tj
+T* (approximately 75× faster.) Tj
+ET
+BT
+/F2 13 Tf
+14.9499999999999993 TL
+0.129 0.145 0.161 rg
+51.0236220472441033 611.7167716535432191 Td
+(New Features) Tj
+ET
+0.09 0.48 0.31 rg
+513.2500787401573916 624.1892125984251152 m
+540.8548031496062549 624.1892125984251152 l
+542.7334410387944672 624.1892125984251152 544.2563779527558836 622.6662756844638125 544.2563779527558836 620.7876377952754865 c
+544.2563779527558836 610.5829133858267141 l
+544.2563779527558836 608.7042754966385019 542.3777400635676713 607.1813385826770855 540.8548031496062549 607.1813385826770855 c
+513.2500787401573916 607.1813385826770855 l
+511.3714408509691793 607.1813385826770855 509.8485039370078198 609.0599764718654114 509.8485039370078198 610.5829133858267141 c
+509.8485039370078198 620.7876377952754865 l
+509.8485039370078198 622.6662756844638125 511.7271418261960321 624.1892125984251152 513.2500787401573916 624.1892125984251152 c
+h
+f
+BT
+/F2 7.5 Tf
+8.625 TL
+1. g
+518.3524409448818915 611.7167716535432191 Td
+(NEW) Tj
+ET
+0.87 0.89 0.91 RG
+0.8503937007874016 w
+51.0236220472441033 603.212834645669318 m
+544.2563779527558836 603.212834645669318 l
+S
+0.09 0.48 0.31 rg
+51.0236220472441033 594.7088976377953031 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 586.2049606299211746 Td
+(Alert when a customer sync connection goes stale) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 572.0317322834645211 Td
+(A new alert fires automatically when a customer data connection has not synced within its) Tj
+T* (expected window. Stale branches are now flagged proactively rather than discovered when a) Tj
+T* (figure looks wrong.) Tj
+ET
+0.09 0.48 0.31 rg
+51.0236220472441033 526.9608661417322537 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 518.4569291338582389 Td
+(Alerts now show their full text with an Acknowledge button) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 504.2837007874015285 Td
+(Each alert in the Insights feed now displays the full alert message, giving you the detail needed) Tj
+T* (to act without navigating away. An Acknowledge button lets administrators mark an alert as) Tj
+T* (seen. Alert text and the Acknowledge action are shown only to administrators, keeping the view) Tj
+T* (clean for other users.) Tj
+ET
+BT
+/F2 13 Tf
+14.9499999999999993 TL
+0.129 0.145 0.161 rg
+51.0236220472441033 425.7640157480315111 Td
+(Improvements) Tj
+ET
+0.15 0.39 0.64 rg
+490.8250787401573803 438.2364566929134071 m
+540.8548031496061412 438.2364566929134071 l
+542.7334410387943535 438.2364566929134071 544.2563779527557699 436.7135197789520475 544.2563779527557699 434.8348818897638353 c
+544.2563779527557699 424.6301574803150061 l
+544.2563779527557699 422.7515195911267938 542.3777400635675576 421.2285826771654342 540.8548031496061412 421.2285826771654342 c
+490.8250787401573803 421.2285826771654342 l
+488.946440850969168 421.2285826771654342 487.4235039370078084 423.1072205663536465 487.4235039370078084 424.6301574803150061 c
+487.4235039370078084 434.8348818897638353 l
+487.4235039370078084 436.7135197789520475 489.3021418261960207 438.2364566929134071 490.8250787401573803 438.2364566929134071 c
+h
+f
+BT
+/F2 7.5 Tf
+8.625 TL
+1. g
+495.9274409448818233 425.7640157480315111 Td
+(IMPROVED) Tj
+ET
+0.87 0.89 0.91 RG
+0.8503937007874016 w
+51.0236220472441033 417.2600787401574394 m
+544.2563779527558836 417.2600787401574394 l
+S
+0.15 0.39 0.64 rg
+51.0236220472441033 408.7561417322834245 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 400.2522047244094097 Td
+(At-risk customer detection in Insights is ~75× faster) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 386.0789763779527561 Td
+(The query that identifies at-risk customers has been rewritten. It now completes in roughly 46) Tj
+T* (ms instead of 3.6 s, so the Insights feed loads and refreshes almost instantly.) Tj
+ET
+0.15 0.39 0.64 rg
+51.0236220472441033 354.6144094488188898 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 346.110472440944875 Td
+(Sync Now and Sync All report what actually happened) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 331.9372440944881646 Td
+(Running a manual sync now shows a clear summary of what each run did — which customers) Tj
+T* (were updated, which were skipped, and any that could no longer be found in Sage. If a sync) Tj
+T* (fails, it retries the connection automatically before giving up.) Tj
+ET
+BT
+/F2 13 Tf
+14.9499999999999993 TL
+0.129 0.145 0.161 rg
+51.0236220472441033 267.0238582677164914 Td
+(Fixes) Tj
+ET
+0.69 0.49 0.09 rg
+508.6750787401573461 279.4962992125983874 m
+540.8548031496061412 279.4962992125983874 l
+542.7334410387943535 279.4962992125983874 544.2563779527557699 277.9733622986370278 544.2563779527557699 276.0947244094488155 c
+544.2563779527557699 265.8900000000000432 l
+544.2563779527557699 264.0113621108118309 542.3777400635675576 262.4884251968504714 540.8548031496061412 262.4884251968504714 c
+508.6750787401573461 262.4884251968504714 l
+506.7964408509691339 262.4884251968504714 505.2735039370077743 264.3670630860386837 505.2735039370077743 265.8900000000000432 c
+505.2735039370077743 276.0947244094488155 l
+505.2735039370077743 277.9733622986370278 507.1521418261959866 279.4962992125983874 508.6750787401573461 279.4962992125983874 c
+h
+f
+BT
+/F2 7.5 Tf
+8.625 TL
+1. g
+513.7774409448817323 267.0238582677164914 Td
+(FIXED) Tj
+ET
+0.87 0.89 0.91 RG
+0.8503937007874016 w
+51.0236220472441033 258.5199212598424765 m
+544.2563779527558836 258.5199212598424765 l
+S
+0.69 0.49 0.09 rg
+51.0236220472441033 250.0159842519684616 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 241.5120472440944468 Td
+(Collections no longer labels accounts as 'Paid in full' incorrectly) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 227.3388188976377933 Td
+(When a customer's balance was cleared by the nightly data sync rather than by an actual) Tj
+T* (payment, Collections could mark the account as 'Paid in full'. The logic now correctly) Tj
+T* (distinguishes a sync-cleared balance from a genuine receipt. Historical records mislabelled in) Tj
+T* (earlier versions have been corrected automatically. Additionally, assignments are now closed) Tj
+T* (when a customer is removed from Sage, so the worklist stays up to date.) Tj
+ET
+0.69 0.49 0.09 rg
+51.0236220472441033 155.0553543307086102 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 146.5514173228345953 Td
+(Credit: invoice ages are now calculated in South African days) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 132.3781889763779418 Td
+(Invoice ages in the Credit area were calculated one day shorter than the correct South African) Tj
+T* (\(UTC+2\) day boundary. Ages now reflect the correct local date, so overdue status and aging) Tj
+T* (buckets match what you see in Sage.) Tj
+ET
+0.87 0.89 0.91 RG
+0.8503937007874016 w
+51.0236220472441033 34.0157480314960665 m
+544.2563779527558836 34.0157480314960665 l
+S
+BT
+/F1 8 Tf
+9.1999999999999993 TL
+0.353 0.392 0.451 rg
+51.0236220472441033 19.8425196850394059 Td
+(Cardoso App · 9 Nov 2026) Tj
+ET
+BT
+/F1 8 Tf
+9.1999999999999993 TL
+0.353 0.392 0.451 rg
+503.6163779527558404 19.8425196850394059 Td
+(Page 1 of 2) Tj
+ET
+endstream
+endobj
+5 0 obj
+<</Type /Page
+/Parent 1 0 R
+/Resources 2 0 R
+/MediaBox [0 0 595.2799999999999727 841.8899999999999864]
+/Contents 6 0 R
+>>
+endobj
+6 0 obj
+<<
+/Length 4100
+>>
+stream
+0.8503937007874016 w
+0.87 0.89 0.91 RG
+0.69 0.49 0.09 rg
+51.0236220472441033 788.0317322834645211 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 779.5277952755905062 Td
+(Removing a site from the hub now clears all of its data) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 765.3545669291338527 Td
+(When a site was removed from the hub, some customer and reporting records were not deleted.) Tj
+T* (This has been fixed, and any stale data left by previously removed sites has been cleaned up) Tj
+T* (automatically.) Tj
+ET
+0.69 0.49 0.09 rg
+51.0236220472441033 720.2837007874014716 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 711.7797637795275705 Td
+(Same-day customer changes now reach the hub) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 697.6065354330708033 Td
+(Customer records updated in Sage on the same day as a hub sync were sometimes missed. The) Tj
+T* (hub now uses the correct cutoff time so that all changes made on the day of the sync are) Tj
+T* (included. Customers who have been removed from Sage also have their balances cleared) Tj
+T* (promptly.) Tj
+ET
+0.69 0.49 0.09 rg
+51.0236220472441033 638.9293700787401349 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 630.42543307086612 Td
+(Backup pruning never removes the most recent verified backup) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 616.2522047244094665 Td
+(A logic gap could cause the backup prune to delete the newest verified backup if it fell outside) Tj
+T* (the retention window. The prune now always keeps the most recent verified copy, and) Tj
+T* (remembers which backup was last verified even after the job history is cleared.) Tj
+ET
+0.69 0.49 0.09 rg
+51.0236220472441033 571.1813385826770855 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 562.6774015748030706 Td
+(An incomplete backup no longer appears healthy) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 548.5041732283464171 Td
+(A backup file cut off mid-write \(for example, by a system interruption\) could previously pass the) Tj
+T* (health check and be reported as a good backup. Incomplete files are now detected and marked) Tj
+T* (as failed.) Tj
+ET
+0.69 0.49 0.09 rg
+51.0236220472441033 503.4333070866140929 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 494.929370078740078 Td
+("Sage down for N min" counts from the actual start of the outage) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 480.7561417322834245 Td
+(The health indicator showing how long Sage has been unavailable was measuring from the) Tj
+T* (wrong reference point, making outages appear shorter than they were. It now counts from the) Tj
+T* (first moment connectivity was lost.) Tj
+ET
+0.69 0.49 0.09 rg
+51.0236220472441033 435.6852755905511003 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 427.1813385826770855 Td
+(Inventory sync now reports failures correctly) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 413.0081102362203751 Td
+(When the inventory rollup or vendor-refresh step failed during a sync, the job was incorrectly) Tj
+T* (recorded as successful. Failures are now reported accurately in the Job Runs log.) Tj
+ET
+0.87 0.89 0.91 RG
+0.8503937007874016 w
+51.0236220472441033 34.0157480314960665 m
+544.2563779527558836 34.0157480314960665 l
+S
+BT
+/F1 8 Tf
+9.1999999999999993 TL
+0.353 0.392 0.451 rg
+51.0236220472441033 19.8425196850394059 Td
+(Cardoso App · 9 Nov 2026) Tj
+ET
+BT
+/F1 8 Tf
+9.1999999999999993 TL
+0.353 0.392 0.451 rg
+503.6163779527558404 19.8425196850394059 Td
+(Page 2 of 2) Tj
+ET
+endstream
+endobj
+1 0 obj
+<</Type /Pages
+/Kids [3 0 R 5 0 R ]
+/Count 2
+>>
+endobj
+7 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+8 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica-Bold
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+9 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica-Oblique
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+10 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica-BoldOblique
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+11 0 obj
+<<
+/Type /Font
+/BaseFont /Courier
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+12 0 obj
+<<
+/Type /Font
+/BaseFont /Courier-Bold
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+13 0 obj
+<<
+/Type /Font
+/BaseFont /Courier-Oblique
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+14 0 obj
+<<
+/Type /Font
+/BaseFont /Courier-BoldOblique
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+15 0 obj
+<<
+/Type /Font
+/BaseFont /Times-Roman
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+16 0 obj
+<<
+/Type /Font
+/BaseFont /Times-Bold
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+17 0 obj
+<<
+/Type /Font
+/BaseFont /Times-Italic
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+18 0 obj
+<<
+/Type /Font
+/BaseFont /Times-BoldItalic
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+19 0 obj
+<<
+/Type /Font
+/BaseFont /ZapfDingbats
+/Subtype /Type1
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+20 0 obj
+<<
+/Type /Font
+/BaseFont /Symbol
+/Subtype /Type1
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+2 0 obj
+<<
+/ProcSet [/PDF /Text /ImageB /ImageC /ImageI]
+/Font <<
+/F1 7 0 R
+/F2 8 0 R
+/F3 9 0 R
+/F4 10 0 R
+/F5 11 0 R
+/F6 12 0 R
+/F7 13 0 R
+/F8 14 0 R
+/F9 15 0 R
+/F10 16 0 R
+/F11 17 0 R
+/F12 18 0 R
+/F13 19 0 R
+/F14 20 0 R
+>>
+/XObject <<
+>>
+>>
+endobj
+21 0 obj
+<<
+/Producer (jsPDF 4.2.1)
+/CreationDate (D:20261110061241-00'00')
+>>
+endobj
+22 0 obj
+<<
+/Type /Catalog
+/Pages 1 0 R
+/OpenAction [3 0 R /FitH null]
+/PageLayout /OneColumn
+>>
+endobj
+xref
+0 23
+0000000000 65535 f 
+0000013241 00000 n 
+0000015066 00000 n 
+0000000015 00000 n 
+0000000152 00000 n 
+0000008952 00000 n 
+0000009089 00000 n 
+0000013304 00000 n 
+0000013429 00000 n 
+0000013559 00000 n 
+0000013692 00000 n 
+0000013830 00000 n 
+0000013954 00000 n 
+0000014083 00000 n 
+0000014215 00000 n 
+0000014351 00000 n 
+0000014479 00000 n 
+0000014606 00000 n 
+0000014735 00000 n 
+0000014868 00000 n 
+0000014970 00000 n 
+0000015316 00000 n 
+0000015402 00000 n 
+trailer
+<<
+/Size 23
+/Root 22 0 R
+/Info 21 0 R
+/ID [ <3A04684B791B76FE9BE3B05C9D04101D> <3A04684B791B76FE9BE3B05C9D04101D> ]
+>>
+startxref
+15506
+%%EOF
