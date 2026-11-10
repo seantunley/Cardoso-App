@@ -72,6 +72,7 @@ const HubJti = React.lazy(() => import('./pages/HubJti'));
 const InventoryMovement = React.lazy(() => import('./pages/InventoryMovement'));
 const PriceList = React.lazy(() => import('./pages/PriceList'));
 const StockReceipts = React.lazy(() => import('./pages/StockReceipts'));
+const StockTake = React.lazy(() => import('./pages/StockTake'));
 const SalesCommission = React.lazy(() => import('./pages/SalesCommission'));
 const HubCommission = React.lazy(() => import('./pages/HubCommission'));
 const MonthlySalesFigures = React.lazy(() => import('./pages/MonthlySalesFigures'));
@@ -109,6 +110,7 @@ export const PAGES = {
     "InventoryMovement": InventoryMovement,
     "PriceList": PriceList,
     "StockReceipts": StockReceipts,
+    "StockTake": StockTake,
     "SalesCommission": SalesCommission,
     "HubCommission": HubCommission,
     "MonthlySalesFigures": MonthlySalesFigures,

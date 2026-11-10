@@ -41,6 +41,7 @@ const permissionTabs = [
       { key: "can_access_inventory", label: "Inventory", description: "View and browse inventory records" },
       { key: "can_access_inventory_movement", label: "Inventory Movement", description: "Sales velocity, dead stock, and demand forecast tools (separate from Inventory browsing)" },
       { key: "can_access_stock_receipt_expiry", label: "Stock Receipt Expiry", description: "View and capture expiry dates on stock receipt lines from Sage PO receipts" },
+      { key: "can_access_stock_take", label: "Stock Take", description: "Scan barcodes, build the barcode map, and look items up on a phone during a stock count" },
       { key: "can_access_price_list", label: "Price List", description: "Generate customer-facing price lists from Sage (multi-list, by commodity, PDF export)" },
     ],
   },
